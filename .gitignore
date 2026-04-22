@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+db.sqlite3
+media/
+static/
+
+# Node.js
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project Specific
+*.log
+*.bak
+*.swp
+tmp/
+artifacts/
+*.md_bak
+makemigrations_error.txt
+makemigrations_verbose.txt

@@ -1,0 +1,47 @@
+# Django Core
+Django>=5.0
+djangorestframework
+
+# Database & Cache
+psycopg[binary]
+redis
+django-redis
+
+# Celery & Message Broker
+celery
+django-celery-beat
+pika
+
+# Authentication & Security
+pydantic[email]>=2.0
+passlib[bcrypt]
+django-cors-headers>=4.3
+pyotp
+bcrypt
+PyJWT
+cryptography
+
+# Utils
+django-environ
+structlog
+
+# Metrics & Observability
+prometheus_client
+sentry-sdk[django]
+
+# Real-time WebSockets
+channels
+daphne
+channels-redis
+
+# Report Generation
+WeasyPrint
+
+# External Integrations
+boto3
+stripe
+anthropic
+httpx
+shodan
+sslyze
+beautifulsoup4

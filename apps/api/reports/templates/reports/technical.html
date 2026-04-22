@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Relatório Técnico HackerScan Pro</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
+    {% if inline_css %}
+    <style>{{ inline_css|safe }}</style>
+    {% else %}
+    <link rel="stylesheet" href="report.css">
+    {% endif %}
+</head>
+<body>
+    <div class="report-header">
+        <h1 class="report-title">HackerScan Pro</h1>
+        <p class="report-subtitle">Relatório Técnico de Segurança</p>
+        <p>ID do Scan: {{ scan.id }} | Data: {{ scan.created_at|date:"d/m/Y H:i" }}</p>
+    </div>
+
+    <div class="section">
+        <h2>1. Sumário de Vulnerabilidades</h2>
+        <div class="summary-stats">
+            <div class="stat-item">
+                <span class="stat-value severity-critical">{{ scan.critical_count }}</span>
+                <span class="stat-label">Critical</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value severity-high">{{ scan.high_count }}</span>
+                <span class="stat-label">High</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value severity-medium">{{ scan.medium_count }}</span>
+                <span class="stat-label">Medium</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">{{ scan.findings|length }}</span>
+                <span class="stat-label">Total</span>
+            </div>
+        </div>
+
+        <table class="risk-table">
+... (rest of the table)
+            <thead>
+                <tr>
+                    <th>Gravidade</th>
+                    <th>Vulnerabilidade</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for finding in scan.findings %}
+                <tr>
+                    <td><span class="severity-{{ finding.severity|lower }}">{{ finding.severity }}</span></td>
+                    <td>{{ finding.title }}</td>
+                    <td>{{ finding.status }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>2. Simulação de Cadeia de Ataque (IA)</h2>
+        <div class="predictive-box">
+            <div class="predictive-title">🤖 ANÁLISE PREDITIVA DE RISCO</div>
+            <div class="predictive-content">
+                {{ scan.ai_prediction|linebreaksbr }}
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>3. Detalhes das Vulnerabilidades</h2>
+        {% for finding in scan.findings %}
+        <div class="finding-card">
+            <div class="finding-title">{{ finding.title }}</div>
+            <p><strong>Severidade:</strong> <span class="severity-{{ finding.severity|lower }}">{{ finding.severity }}</span></p>
+            
+            <div class="ai-box">
+                <div class="ai-box-title">🤖 Análise AI Profissional</div>
+                <p>{{ finding.ai_explanation|linebreaksbr }}</p>
+            </div>
+
+            <p><strong>Descrição:</strong> {{ finding.description }}</p>
+            
+            {% if finding.payload %}
+            <p><strong>Evidência / Payload:</strong></p>
+            <div class="code-block">{{ finding.payload }}</div>
+            {% endif %}
+
+            <div class="remediation-box">
+                <p><strong>Guia de Remediação (IA):</strong></p>
+                <p>{{ finding.ai_remediation|linebreaksbr }}</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="section">
+        <h2>3. Metodologia</h2>
+        <p>Este scan foi realizado utilizando o motor HackerScan Pro v2. O processo inclui descoberta de ativos, análise de portas, detecção de serviços e exploração de payloads controlada.</p>
+    </div>
+</body>
+</html>

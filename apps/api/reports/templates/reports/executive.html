@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Relatório Executivo HackerScan Pro</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
+    {% if inline_css %}
+    <style>{{ inline_css|safe }}</style>
+    {% else %}
+    <link rel="stylesheet" href="report.css">
+    {% endif %}
+</head>
+<body>
+    <div class="report-header">
+        <h1 class="report-title">HackerScan Pro</h1>
+        <p class="report-subtitle">Resumo Executivo de Cibersegurança</p>
+        <p>Workspace: {{ scan.workspace.name }} | Data: {{ scan.created_at|date:"d/m/Y" }}</p>
+    </div>
+
+    <div class="section">
+        <h2>Visão Geral do Risco</h2>
+        <p>O scan realizado identificou o estado atual da postura de segurança da sua aplicação/infraestrutura. Este relatório foca no impacto de negócio e nas ações prioritárias de mitigação.</p>
+    </div>
+
+    <div class="section">
+        <h2>Distribuição de Riscos</h2>
+        <div class="summary-stats">
+            <div class="stat-item">
+                <span class="stat-value severity-critical">{{ scan.critical_count }}</span>
+                <span class="stat-label">Críticas</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value severity-high">{{ scan.high_count }}</span>
+                <span class="stat-label">Altas</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">{{ scan.findings|length }}</span>
+                <span class="stat-label">Total</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Análise Estratégica (IA)</h2>
+        <div class="predictive-box">
+            <div class="predictive-title">🎯 VISÃO ESTRATÉGICA DE RISCO</div>
+            <div class="predictive-content">
+                {{ scan.ai_prediction|linebreaksbr }}
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Principais Ameaças Identificadas</h2>
+        {% for finding in scan.findings %}
+            {% if finding.severity == 'CRITICAL' or finding.severity == 'HIGH' %}
+            <div class="finding-card">
+                <div class="finding-title">{{ finding.title }}</div>
+                <p><strong>Impacto de Negócio:</strong> {{ finding.business_impact|default:"Esta vulnerabilidade pode levar a exposição de dados sensíveis ou interrupção de serviço." }}</p>
+                <p><strong>Ação Recomendada:</strong> {{ finding.executive_summary|default:"Mitigação imediata pela equipa técnica." }}</p>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="section">
+        <h2>Conclusão</h2>
+        <p>Recomendamos a remediação prioritária dos itens Críticos e Altos no prazo de 48h. A HackerScan Pro continua a monitorizar o seu perímetro em tempo real.</p>
+    </div>
+</body>
+</html>

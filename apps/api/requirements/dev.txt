@@ -1,0 +1,12 @@
+-r base.txt
+
+# Linting & Formatting
+black
+ruff
+
+# Testing
+pytest
+pytest-django
+pytest-cov
+factory-boy
+pytest-asyncio

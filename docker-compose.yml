@@ -1,0 +1,181 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./apps/api:/app
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DATABASE_URL: postgresql://hackscan:hackscan_password@db:5432/hackscan_db
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-only-secret-key-change-in-production
+      DEBUG: "True"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+
+  celery-worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./apps/api:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DATABASE_URL: postgresql://hackscan:hackscan_password@db:5432/hackscan_db
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-only-secret-key-change-in-production
+      DEBUG: "True"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    command: >
+      celery -A config.celery worker
+      --loglevel=info
+      --concurrency=4
+      --queues=urgent,reports,notifications,scheduled,celery
+      --hostname=worker@%h
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+
+  celery-scanner:
+    build:
+      context: .
+      dockerfile: infra/docker/scanner.Dockerfile
+    volumes:
+      - ./apps/api:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DATABASE_URL: postgresql://hackscan:hackscan_password@db:5432/hackscan_db
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-only-secret-key-change-in-production
+      DEBUG: "True"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    command: >
+      celery -A config.celery worker
+      --loglevel=info
+      --concurrency=2
+      --queues=scans
+      --hostname=scanner@%h
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+
+  celery-beat:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./apps/api:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DATABASE_URL: postgresql://hackscan:hackscan_password@db:5432/hackscan_db
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-only-secret-key-change-in-production
+      DEBUG: "True"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    command: >
+      celery -A config.celery beat
+      --loglevel=info
+      --scheduler=django_celery_beat.schedulers:DatabaseScheduler
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+
+  db:
+    image: timescale/timescaledb:latest-pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: hackscan
+      POSTGRES_PASSWORD: hackscan_password
+      POSTGRES_DB: hackscan_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hackscan -d hackscan_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: hackscan
+      RABBITMQ_DEFAULT_PASS: hackscan_password
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: hackscan_admin
+      MINIO_ROOT_PASSWORD: hackscan_password
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
+  miniodata:

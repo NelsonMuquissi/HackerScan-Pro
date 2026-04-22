@@ -1,0 +1,178 @@
+@page {
+    size: A4;
+    margin: 2cm;
+    @top-right {
+        content: "HackerScan Pro - Private & Confidential";
+        font-family: 'Inter', sans-serif;
+        font-size: 9pt;
+        color: #6b7280;
+    }
+    @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: 'Inter', sans-serif;
+        font-size: 9pt;
+        color: #6b7280;
+    }
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: #111827;
+    line-height: 1.5;
+    margin: 0;
+}
+
+h1, h2, h3, h4 {
+    color: #030712;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.report-header {
+    text-align: center;
+    border-bottom: 3px solid #10b981;
+    padding-bottom: 2em;
+    margin-bottom: 3em;
+}
+
+.report-title {
+    font-size: 28pt;
+    font-weight: 800;
+    margin: 0;
+    color: #064e3b;
+}
+
+.report-subtitle {
+    font-size: 14pt;
+    color: #6b7280;
+    margin-top: 0.5em;
+}
+
+.section {
+    margin-bottom: 2em;
+    page-break-inside: avoid;
+}
+
+.severity-critical { color: #991b1b; font-weight: bold; }
+.severity-high { color: #dc2626; font-weight: bold; }
+.severity-medium { color: #d97706; font-weight: bold; }
+.severity-low { color: #2563eb; font-weight: bold; }
+
+.finding-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1.5em;
+    margin-bottom: 1.5em;
+    page-break-inside: avoid;
+}
+
+.finding-title {
+    font-size: 14pt;
+    font-weight: 700;
+    margin-bottom: 0.5em;
+}
+
+.code-block {
+    background-color: #f3f4f6;
+    border-radius: 4px;
+    padding: 1em;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 9pt;
+    white-space: pre-wrap;
+    border-left: 4px solid #9ca3af;
+    margin: 1em 0;
+}
+
+.risk-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+.risk-table th, .risk-table td {
+    border: 1px solid #e5e7eb;
+    padding: 0.75em;
+    text-align: left;
+}
+
+.risk-table th {
+    background-color: #f9fafb;
+    font-weight: 600;
+}
+
+.ai-box {
+    background-color: #f0fdfa;
+    border: 1px solid #14b8a6;
+    border-radius: 6px;
+    padding: 1em;
+    margin: 1em 0;
+    font-size: 10pt;
+}
+
+.ai-box-title {
+    font-weight: 800;
+    color: #0d9488;
+    margin-bottom: 0.5em;
+    text-transform: uppercase;
+    font-size: 8pt;
+    letter-spacing: 0.05em;
+}
+
+.remediation-box {
+    background-color: #eff6ff;
+    border-left: 5px solid #3b82f6;
+    padding: 1em;
+    margin-top: 1em;
+}
+
+.predictive-box {
+    background-color: #064e3b;
+    color: #ecfdf5;
+    border-radius: 8px;
+    padding: 2em;
+    margin: 2em 0;
+    border-left: 8px solid #10b981;
+}
+
+.predictive-title {
+    font-size: 14pt;
+    font-weight: 800;
+    color: #34d399;
+    margin-bottom: 1em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-bottom: 1px solid #065f46;
+    padding-bottom: 0.5em;
+}
+
+.predictive-content {
+    font-size: 11pt;
+    line-height: 1.7;
+}
+
+.summary-stats {
+    display: flex;
+    justify-content: space-around;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1.5em;
+    margin-bottom: 2em;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 24pt;
+    font-weight: 800;
+    display: block;
+}
+
+.stat-label {
+    font-size: 8pt;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
