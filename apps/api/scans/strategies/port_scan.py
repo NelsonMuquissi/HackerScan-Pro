@@ -208,7 +208,5 @@ class PortScanStrategy(BaseScanStrategy):
                         description=f"Port {port} ({service}) was found open via direct TCP connection.",
                         severity=sev_str,
                         evidence={"port": port, "service": service, "method": "socket_fallback"},
-                        plugin_slug=self.slug
                     ))
         return findings
-indings

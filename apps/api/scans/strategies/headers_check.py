@@ -151,3 +151,13 @@ class HeadersCheckStrategy(BaseScanStrategy):
 
         self.log(scan, "HTTP security headers check completed.")
         return findings
+
+    def _handle_error(self, url: str, exc: Exception, findings: list[FindingData]) -> list[FindingData]:
+        findings.append(FindingData(
+            plugin_slug=self.slug,
+            severity="info",
+            title="HTTP Connection Failed",
+            description=f"Could not connect to {url}: {exc}",
+            evidence={"url": url, "error": str(exc)},
+        ))
+        return findings

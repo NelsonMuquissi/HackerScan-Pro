@@ -40,6 +40,10 @@ def run_scan(self, scan_id: str) -> dict:
     import scans.strategies.xss_scan     # noqa: F401
     import scans.strategies.js_secrets   # noqa: F401
     import scans.strategies.dns_audit    # noqa: F401
+    import scans.strategies.cloud_enum   # noqa: F401
+    import scans.strategies.container_security # noqa: F401
+    import scans.strategies.api_fuzzer   # noqa: F401
+    import scans.strategies.shodan_recon # noqa: F401
     from scans.external.epss import epss_service # noqa: PLC0415
 
     try:
@@ -71,17 +75,18 @@ def run_scan(self, scan_id: str) -> dict:
         SCAN_TYPE_MAP = {
             ScanType.QUICK: ["port_scan", "headers_check"],
             ScanType.VULN: ["nuclei_vuln", "sqlmap_scan", "xss_scan", "js_secrets"],
-            ScanType.RECON: ["subdomain_recon", "dns_audit"],
+            ScanType.RECON: ["subdomain_recon", "dns_audit", "shodan_recon", "cloud_exposure"],
             ScanType.SSL: ["sslyze_audit"],
-            ScanType.FUZZ: ["dir_fuzzing"],
-            ScanType.DISCOVERY: ["resource_discovery"],
+            ScanType.FUZZ: ["dir_fuzzing", "api_fuzzer"],
+            ScanType.DISCOVERY: ["resource_discovery", "cloud_exposure"],
             ScanType.FULL: [
                 "port_scan", "headers_check", "nuclei_full", 
                 "sslyze_audit", "dir_fuzzing", "resource_discovery",
-                "sqlmap_scan", "xss_scan", "js_secrets", "dns_audit"
+                "sqlmap_scan", "xss_scan", "js_secrets", "dns_audit",
+                "shodan_recon", "cloud_exposure", "api_fuzzer", "container_security"
             ],
             ScanType.AD_AUDIT: ["ad_tactical"],
-            ScanType.K8S_SECURITY: ["k8s_hardening"],
+            ScanType.K8S_SECURITY: ["k8s_hardening", "container_security"],
             ScanType.SAP_AUDIT: ["sap_recon"],
         }
 
