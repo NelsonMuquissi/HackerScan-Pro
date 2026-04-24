@@ -91,16 +91,19 @@ class PortScanStrategy(BaseScanStrategy):
             args = ["-sV", "-T4", "-Pn", "-oX", output_file]
             
             # 1. Determine port range and scan type based on ScanType
+            # NOTE: -sU (UDP) is intentionally EXCLUDED from all scan types because
+            # scanning 65535 UDP ports can take several hours, causing task timeouts.
+            # NOTE: -O (OS detection) is excluded as it requires raw socket privileges
+            # that are not reliably available in all container environments.
             if scan and scan.scan_type == "full":
-                self.log(scan, "Full scan requested: scanning all 65535 ports...")
-                args.extend(["-p-", "-sS", "-sU"]) # SYN + UDP (requires root for -sS and -sU)
+                self.log(scan, "Full scan requested: scanning top 5000 ports (TCP SYN)...")
+                args.extend(["-p", "1-5000"])  # Practical full scan: top 5000 ports, fast
             elif scan and scan.scan_type == "quick":
-                args.extend(["--top-ports", "1000"])
+                self.log(scan, "Quick scan requested: scanning top 100 ports...")
+                args.extend(["--top-ports", "100"])
             else:
-                args.extend(["--top-ports", "2000"])
-
-            # 2. Add OS Detection
-            args.append("-O")
+                self.log(scan, "Standard scan: scanning top 1000 ports...")
+                args.extend(["--top-ports", "1000"])
 
             # 3. Handle IPv6
             if ":" in host:
@@ -112,9 +115,16 @@ class PortScanStrategy(BaseScanStrategy):
             # In a containerized scanner, we usually run as root.
             
             self.log(scan, f"Running: {' '.join(cmd)}")
-            # Increased timeout for full scans
-            timeout = 3600 if "-p-" in args else 600
-            subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
+            # Practical timeouts: full=600s (10min), quick=120s (2min), standard=300s (5min)
+            if scan and scan.scan_type == "full":
+                timeout = 600
+            elif scan and scan.scan_type == "quick":
+                timeout = 120
+            else:
+                timeout = 300
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
+            if result.returncode != 0 and result.stderr:
+                logger.warning("Nmap stderr: %s", result.stderr[:500])
 
             if os.path.exists(output_file):
                 findings = self._parse_nmap_xml(output_file, host)

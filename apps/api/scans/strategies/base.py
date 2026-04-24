@@ -25,9 +25,13 @@ class FindingData:
     severity: str = "info"          # Severity enum value
     plugin_slug: str = ""
     remediation: str = ""
-    evidence: dict = field(default_factory=dict)
+    evidence: dict | str = field(default_factory=dict)   # accepts both str and dict
     cvss_score: float | None = None
     epss_score: float | None = None
+    # Optional metadata (not persisted to Finding model, but useful for logging/reporting)
+    category: str = ""
+    confidence: int = 0
+
 
     def get_fingerprint(self, target_id: str | UUID) -> str:
         """Reproduce the same fingerprint logic as the Finding model."""

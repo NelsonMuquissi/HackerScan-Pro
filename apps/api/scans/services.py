@@ -56,6 +56,11 @@ class ScanTargetService:
     @staticmethod
     def create(user, workspace, *, name: str, host: str, target_type: str = "domain",
                description: str = "", tags: list | None = None) -> ScanTarget:
+        """
+        Creates a new ScanTarget within a workspace.
+        Note: The 'owner' field is kept for historical tracking but isolation
+        is strictly enforced via the 'workspace' foreign key.
+        """
         if ScanTarget.objects.filter(workspace=workspace, host=host).exists():
             raise ConflictError(f"A target with host '{host}' already exists in this workspace.")
         return ScanTarget.objects.create(
@@ -84,7 +89,8 @@ from .models import Scan, ScanStatus, ScanTarget, ScanType
 
 class ScanService:
     @staticmethod
-    def create(user, workspace_id: UUID, *, target_id: UUID, scan_type: str, config: dict) -> Scan:
+    def create(user, workspace_id: UUID, *, target_id: UUID, scan_type: str, 
+               config: dict, plugin_ids: list[str] | None = None) -> Scan:
         # Validate target exists in this workspace
         target = ScanTargetService.get_or_404(workspace_id, target_id)
 
@@ -97,6 +103,7 @@ class ScanService:
             target=target,
             triggered_by=user,
             scan_type=scan_type,
+            plugin_ids=plugin_ids or [],
             config=config,
             status=ScanStatus.PENDING,
         )
@@ -166,32 +173,41 @@ class ScanService:
         return qs
 
     @staticmethod
-    def quick_scan(user, target_url: str, scan_type: str = ScanType.QUICK) -> Scan:
+    def quick_scan(user, target_url: str, scan_type: str = ScanType.QUICK,
+                   workspace_id: UUID | None = None, plugin_ids: list[str] | None = None) -> Scan:
         """
         One-step convenience: parse URL → upsert ScanTarget → create Scan → trigger.
         Used by the dashboard's quick-scan form.
         """
         from urllib.parse import urlparse  # noqa: PLC0415
         from .tasks import run_scan        # noqa: PLC0415
+        from users.models import Workspace, WorkspaceMember # noqa: PLC0415
 
         parsed = urlparse(target_url)
+        # Handle cases like 'google.com' (no scheme) vs 'https://google.com'
         host = parsed.hostname or parsed.path.split("/")[0]
         if not host:
             raise ServiceError("Could not extract a hostname from the provided URL.")
 
-        # Get the user's workspace (first owned workspace, or first membership)
+        # 1. Resolve Workspace
         workspace = None
-        owned = user.owned_workspaces.first()
-        if owned:
-            workspace = owned
+        if workspace_id:
+            try:
+                workspace = Workspace.objects.get(pk=workspace_id)
+            except Workspace.DoesNotExist:
+                raise NotFoundError("Specified workspace not found.")
         else:
-            membership = user.memberships.select_related("workspace").first()
-            if membership:
-                workspace = membership.workspace
+            # Fallback for legacy calls or missing ID
+            owned = user.owned_workspaces.first()
+            if owned:
+                workspace = owned
+            else:
+                membership = user.memberships.select_related("workspace").first()
+                if membership:
+                    workspace = membership.workspace
 
         if workspace is None:
-            # Auto-create workspace on first scan (handles legacy users without one)
-            from users.models import Workspace, WorkspaceMember  # noqa: PLC0415
+            # Auto-create workspace on first scan (bootstrap personal workspace)
             workspace = Workspace.objects.create(
                 owner=user,
                 name=f"{user.full_name or user.email}'s Workspace",
@@ -201,11 +217,12 @@ class ScanService:
                 workspace=workspace, user=user, role="owner"
             )
 
-        # Enforce Quota
+        # 2. Enforce Quota
         allowed, reason = BillingService.check_quota(workspace, "create_scan")
         if not allowed:
             raise ServiceError(reason)
 
+        # 3. Create/Retrieve Target & Scan
         with transaction.atomic():
             target, _created = ScanTarget.objects.get_or_create(
                 workspace=workspace,
@@ -221,6 +238,7 @@ class ScanService:
                 target=target,
                 triggered_by=user,
                 scan_type=scan_type,
+                plugin_ids=plugin_ids or [],
                 config={},
                 status=ScanStatus.QUEUED,
             )
@@ -229,5 +247,5 @@ class ScanService:
             BillingService.increment_usage(workspace, "scans_count")
 
         run_scan.delay(str(scan.id))
-        logger.info("ScanService.quick_scan: queued scan %s for %s", scan.id, host)
+        logger.info("ScanService.quick_scan: queued scan %s for %s in workspace %s", scan.id, host, workspace.id)
         return scan

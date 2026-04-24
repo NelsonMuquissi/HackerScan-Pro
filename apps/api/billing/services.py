@@ -165,6 +165,30 @@ class BillingService:
             logger.info("Module purchased: workspace=%s module=%s", workspace_id, module_slug)
             return
 
+        if event_type == "ai_credits":
+            package_slug = metadata.get("package_slug")
+            from ai.models import CreditPackage  # noqa: PLC0415
+            from ai.credit_service import CreditService  # noqa: PLC0415
+            from users.models import Workspace  # noqa: PLC0415
+            
+            workspace = Workspace.objects.get(id=workspace_id)
+            package = CreditPackage.objects.get(slug=package_slug)
+            
+            # Idempotency check via stripe_payment_intent_id is handled inside CreditService.credit
+            # but we can do a quick check here too if desired.
+            payment_intent = session.get("payment_intent")
+            
+            CreditService.credit(
+                workspace=workspace,
+                amount=package.total_credits,
+                action=f"purchase_{package.slug}",
+                credit_type="purchased",
+                stripe_payment_intent_id=payment_intent,
+            )
+            logger.info("AI Credits purchased: workspace=%s package=%s amount=%s", 
+                        workspace_id, package_slug, package.total_credits)
+            return
+
         # Default: Subscription flow
         plan_id = metadata.get("plan_id")
         billing_cycle = metadata.get("billing_cycle")

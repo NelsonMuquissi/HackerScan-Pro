@@ -14,6 +14,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { getScanAIPrediction } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { InsufficientCreditsModal } from '../ai/InsufficientCreditsModal';
 
 interface AIAnalysisSectionProps {
   scanId: string;
@@ -24,16 +25,22 @@ export function AIAnalysisSection({ scanId }: AIAnalysisSectionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [creditError, setCreditError] = useState<any>(null);
 
   async function loadPrediction(force = false) {
     if (loading) return;
     setLoading(true);
     setError(null);
+    setCreditError(null);
     try {
       const data = await getScanAIPrediction(scanId);
       setPrediction(data.prediction);
     } catch (err: any) {
-      setError(err.message || 'Failed to establish neural link.');
+      if (err.status === 402) {
+        setCreditError(err.data || { needed: 0, available: 0, shortfall: 0 });
+      } else {
+        setError(err.message || 'Failed to establish neural link.');
+      }
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -161,6 +168,14 @@ export function AIAnalysisSection({ scanId }: AIAnalysisSectionProps) {
           )}
         </AnimatePresence>
       </div>
+
+      <InsufficientCreditsModal 
+        isOpen={!!creditError} 
+        onClose={() => setCreditError(null)} 
+        needed={creditError?.needed || 0}
+        available={creditError?.available || 0}
+        shortfall={creditError?.shortfall || 0}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LayoutDashboard, ShieldAlert, Settings, Terminal, FileText, Calendar, ShoppingBag, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, ShieldAlert, Settings, Terminal, FileText, Calendar, ShoppingBag, ShieldCheck, Cpu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function Sidebar() {
@@ -36,6 +36,10 @@ export function Sidebar() {
         <Link href="/dashboard/marketplace" className="flex items-center gap-3 px-3 py-2 text-foreground hover:text-neon-green hover:bg-neon-green-dim rounded-md transition-colors font-mono">
           <ShoppingBag className="w-5 h-5" />
           Marketplace
+        </Link>
+        <Link href="/dashboard/billing/credits" className="flex items-center gap-3 px-3 py-2 text-foreground hover:text-neon-green hover:bg-neon-green-dim rounded-md transition-colors font-mono group">
+          <Cpu className="w-5 h-5 text-primary group-hover:animate-spin" />
+          AI Credits
         </Link>
         <Link href="/dashboard/developers" className="flex items-center gap-3 px-3 py-2 text-foreground hover:text-neon-green hover:bg-neon-green-dim rounded-md transition-colors font-mono">
           <Terminal className="w-5 h-5" />

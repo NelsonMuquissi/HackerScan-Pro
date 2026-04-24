@@ -19,8 +19,9 @@ from .serializers import (
     UserProfileSerializer,
     UserUpdateSerializer,
 )
-from .services import APIKeyService, AuthService, TwoFactorService, UserService
+from .services import APIKeyService, AuthService, TwoFactorService, UserService, WorkspaceService
 from .views_base import BaseView
+from core.mixins.workspace import WorkspaceScopedViewMixin
 
 
 def _get_client_ip(request) -> str:
@@ -245,22 +246,25 @@ from .serializers import WorkspaceMemberSerializer, WorkspaceInviteSerializer, A
 from .models import Workspace
 
 @method_decorator(jwt_required, name='dispatch')
-class WorkspaceMemberListView(BaseView):
+class WorkspaceMemberListView(WorkspaceScopedViewMixin, BaseView):
     """GET /v1/workspaces/<id>/members/"""
 
     def get(self, request, workspace_id):
-        # TODO: verify user belongs to workspace
+        if not WorkspaceService.check_permission(request.user, workspace_id, "viewer"):
+             return self.error_response("Permission denied.", status=403)
         members = WorkspaceService.list_members(workspace_id)
         return self.success_response(WorkspaceMemberSerializer(members, many=True).data)
 
 
 @method_decorator(jwt_required, name='dispatch')
-class WorkspaceInviteView(BaseView):
+class WorkspaceInviteView(WorkspaceScopedViewMixin, BaseView):
     """POST /v1/workspaces/<id>/invites/ | GET /v1/workspaces/join/<token>/"""
 
     def post(self, request, workspace_id):
+        if not WorkspaceService.check_permission(request.user, workspace_id, "admin"):
+             return self.error_response("Permission denied. Only admins can invite users.", status=403)
+             
         workspace = Workspace.objects.get(pk=workspace_id)
-        # TODO: Permission check (only owner/admin can invite)
         
         email = self.json_body.get("email")
         role = self.json_body.get("role", "member")
@@ -291,9 +295,12 @@ class WorkspaceInviteAcceptView(BaseView):
 
 
 @method_decorator(jwt_required, name='dispatch')
-class AuditLogListView(BaseView):
+class AuditLogListView(WorkspaceScopedViewMixin, BaseView):
     """GET /v1/workspaces/<id>/audit-logs/"""
 
     def get(self, request, workspace_id):
+        if not WorkspaceService.check_permission(request.user, workspace_id, "admin"):
+             return self.error_response("Permission denied. Only admins can view audit logs.", status=403)
+             
         logs = WorkspaceService.get_audit_logs(workspace_id)
         return self.success_response(AuditLogSerializer(logs, many=True).data)

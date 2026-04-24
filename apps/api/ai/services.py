@@ -3,8 +3,10 @@ import re
 import logging
 import json
 import httpx
+from types import SimpleNamespace
 from django.conf import settings
 from django.core.cache import cache
+from .decorators import ai_action
 
 logger = logging.getLogger(__name__)
 
@@ -186,43 +188,69 @@ class AIService:
         except Exception as e:
             logger.error(f"❌ Erro na chamada ao Gemini ({GEMINI_MODEL_ID}): {e}")
             return None
-
-    def _call_llm(self, user_prompt: str, max_tokens: int = 1024) -> str | None:
+    def _call_llm(self, user_prompt: str, max_tokens: int = 1024) -> tuple[str | None, object]:
         """
         Wrapper centralizado: tenta Anthropic primeiro, depois Gemini.
-        Retorna o texto da resposta ou None.
-        Nunca levanta exceção.
+        Retorna (texto_resposta, usage_object).
         """
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        
         # Try primary engine first
         if self.anthropic_client:
-            result = self._call_anthropic(user_prompt, max_tokens)
-            if result:
-                return result
-            logger.warning("⚠️ Anthropic falhou, tentando Gemini como fallback...")
+            try:
+                response = self.anthropic_client.messages.create(
+                    model=ANTHROPIC_MODEL_ID,
+                    max_tokens=max_tokens,
+                    system=SYSTEM_PROMPT_PT,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                res_text = response.content[0].text
+                usage.input_tokens = getattr(response.usage, "input_tokens", 0)
+                usage.output_tokens = getattr(response.usage, "output_tokens", 0)
+                return res_text, usage
+            except Exception as e:
+                logger.error(f"❌ Erro na chamada ao Claude: {e}")
+                logger.warning("⚠️ Anthropic falhou, tentando Gemini como fallback...")
 
         # Fallback to Gemini
         if self.gemini_api_key:
-            result = self._call_gemini(user_prompt, max_tokens)
-            if result:
-                return result
-            logger.warning("⚠️ Gemini também falhou. Usando fallback estático.")
+            try:
+                url = f"{GEMINI_API_URL}/{GEMINI_MODEL_ID}:generateContent?key={self.gemini_api_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT_PT}\n\n---\n\n{user_prompt}"}]}],
+                    "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3}
+                }
+                with httpx.Client(timeout=60.0) as client:
+                    response = client.post(url, json=payload)
+                    response.raise_for_status()
 
-        return None
+                data = response.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        res_text = parts[0].get("text", "")
+                        # Gemini usage metadata
+                        meta = data.get("usageMetadata", {})
+                        usage.input_tokens = meta.get("promptTokenCount", 0)
+                        usage.output_tokens = meta.get("candidatesTokenCount", 0)
+                        return res_text, usage
+                logger.warning(f"⚠️ Gemini retornou resposta vazia: {data}")
+            except Exception as e:
+                logger.error(f"❌ Erro na chamada ao Gemini: {e}")
 
-    # ── 1. explain_finding  — cache TTL 3600 s (1 h) ────────────────────
+        return None, usage
 
-    def explain_finding(self, finding_title: str, description: str, severity: str) -> str:
+    # ── 1. explain_finding ──────────────────────────────────────────────
+
+    @ai_action(action="explain_finding", cache_ttl=3600)
+    def explain_finding(self, finding_title: str, description: str, severity: str) -> tuple[str, object]:
         """Gera explicação detalhada de uma vulnerabilidade em PT-BR."""
         safe_title = self._redact_pii(finding_title)
         safe_desc = self._redact_pii(description)
 
-        cache_key = f"ai_explain_{hash(safe_title + severity)}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
-
         if not self.has_ai:
-            return self._fallback_explanation(safe_title, severity)
+            return self._fallback_explanation(safe_title, severity), SimpleNamespace(input_tokens=0, output_tokens=0)
 
         prompt = (
             f"Explique detalhadamente a seguinte vulnerabilidade encontrada pelo HackerScan Pro.\n\n"
@@ -235,26 +263,21 @@ class AIService:
             "3. Como um atacante exploraria isso?"
         )
 
-        result = self._call_llm(prompt, max_tokens=1000)
+        result, usage = self._call_llm(prompt, max_tokens=1000)
         if result:
-            cache.set(cache_key, result, timeout=3600)
-            return result
-        return self._fallback_explanation(safe_title, severity)
+            return result, usage
+        return self._fallback_explanation(safe_title, severity), usage
 
-    # ── 2. generate_remediation_code  — cache TTL 86 400 s (24 h) ───────
+    # ── 2. generate_remediation_code ───────────────────────────────────
 
-    def generate_remediation_code(self, finding_title: str, description: str) -> str:
+    @ai_action(action="remediation_code", cache_ttl=86400)
+    def generate_remediation_code(self, finding_title: str, description: str) -> tuple[str, object]:
         """Gera guia de correção passo a passo com exemplos de código em PT-BR."""
         safe_title = self._redact_pii(finding_title)
         safe_desc = self._redact_pii(description)
 
-        cache_key = f"ai_remediate_{hash(safe_title)}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
-
         if not self.has_ai:
-            return self._fallback_remediation(safe_title)
+            return self._fallback_remediation(safe_title), SimpleNamespace(input_tokens=0, output_tokens=0)
 
         prompt = (
             f"Forneça um guia de correção passo a passo para a seguinte falha de segurança.\n\n"
@@ -267,32 +290,21 @@ class AIService:
             "- Melhores práticas para prevenção futura."
         )
 
-        result = self._call_llm(prompt, max_tokens=1200)
+        result, usage = self._call_llm(prompt, max_tokens=1200)
         if result:
-            cache.set(cache_key, result, timeout=86400)
-            return result
-        return self._fallback_remediation(safe_title)
+            return result, usage
+        return self._fallback_remediation(safe_title), usage
 
-    # Alias para compatibilidade retroativa
-    get_remediation_guide = generate_remediation_code
+    # ── 3. predict_attack_chains ────────────────────────────────────────
 
-    # ── 3. predict_attack_chains  — cache TTL 3600 s (1 h) ──────────────
-
-    def predict_attack_chains(self, findings: list[dict]) -> str:
-        """
-        Recebe uma lista de findings e prevê cadeias de ataque combinadas.
-        Retorna análise em PT-BR. Nunca levanta exceção.
-        """
+    @ai_action(action="attack_chains", cache_ttl=3600)
+    def predict_attack_chains(self, findings: list[dict]) -> tuple[str, object]:
+        """Recebe uma lista de findings e prevê cadeias de ataque combinadas."""
         if not findings:
-            return "Nenhuma vulnerabilidade fornecida para análise de cadeia de ataque."
-
-        cache_key = f"ai_attack_chain_{hash(str(sorted([f.get('title', '') for f in findings])))}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
+            return "Nenhuma vulnerabilidade fornecida.", SimpleNamespace(input_tokens=0, output_tokens=0)
 
         if not self.has_ai:
-            return self._fallback_attack_chain(findings)
+            return self._fallback_attack_chain(findings), SimpleNamespace(input_tokens=0, output_tokens=0)
 
         findings_text = "\n".join(
             f"- [{f.get('severity', 'N/A')}] {f.get('title', 'Sem título')}: {f.get('description', '')[:200]}"
@@ -300,8 +312,7 @@ class AIService:
         )
 
         prompt = (
-            "Com base nas vulnerabilidades listadas abaixo, preveja possíveis cadeias de ataque "
-            "que um adversário poderia explorar combinando estas falhas.\n\n"
+            "Com base nas vulnerabilidades listadas abaixo, preveja possíveis cadeias de ataque...\n"
             f"Vulnerabilidades encontradas:\n{findings_text}\n\n"
             "Para cada cadeia de ataque identificada, descreva:\n"
             "1. Sequência de exploração (passo a passo).\n"
@@ -310,11 +321,10 @@ class AIService:
             "4. Mitigação prioritária recomendada."
         )
 
-        result = self._call_llm(prompt, max_tokens=1500)
+        result, usage = self._call_llm(prompt, max_tokens=1500)
         if result:
-            cache.set(cache_key, result, timeout=3600)
-            return result
-        return self._fallback_attack_chain(findings)
+            return result, usage
+        return self._fallback_attack_chain(findings), usage
 
     # ── Fallbacks (sempre em PT, nunca raise) ───────────────────────────
 

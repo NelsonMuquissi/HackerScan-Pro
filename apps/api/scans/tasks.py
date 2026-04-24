@@ -18,7 +18,15 @@ from django.db import transaction
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=0, name="scans.run_scan")
+@shared_task(
+    bind=True,
+    max_retries=0,
+    name="scans.run_scan",
+    # Hard limit: 20 min. Soft limit: 18 min (gives strategies time to flush/cleanup).
+    # Individual strategies use their own subprocess timeouts (max 10 min for port_scan).
+    soft_time_limit=1080,   # 18 minutes
+    time_limit=1200,        # 20 minutes
+)
 def run_scan(self, scan_id: str) -> dict:
     """
     Returns a summary dict for logging/result backend.
@@ -90,7 +98,9 @@ def run_scan(self, scan_id: str) -> dict:
             ScanType.SAP_AUDIT: ["sap_recon"],
         }
 
-        strategies_to_run = SCAN_TYPE_MAP.get(scan.scan_type, [])
+        strategies_to_run = scan.plugin_ids
+        if not strategies_to_run:
+            strategies_to_run = SCAN_TYPE_MAP.get(scan.scan_type, [])
         
         all_finding_data = []
         errors: list[str] = []
@@ -150,7 +160,8 @@ def run_scan(self, scan_id: str) -> dict:
                             title=fd.title,
                             description=fd.description,
                             remediation=fd.remediation,
-                            evidence=fd.evidence,
+                            # Normalize evidence: JSONField expects dict, but some strategies return strings
+                            evidence=fd.evidence if isinstance(fd.evidence, dict) else {"raw": fd.evidence},
                             cvss_score=fd.cvss_score,
                             epss_score=fd.epss_score,
                             first_seen_at=timezone.now(),

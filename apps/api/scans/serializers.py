@@ -21,12 +21,17 @@ class ScanTargetSerializer(serializers.ModelSerializer):
 class ScanCreateSerializer(serializers.Serializer):
     from .models import ScanType  # noqa: PLC0415
 
-    target_id = serializers.UUIDField()
-    scan_type = serializers.ChoiceField(
+    target_id  = serializers.UUIDField()
+    scan_type  = serializers.ChoiceField(
         choices=ScanType.choices,
         default=ScanType.QUICK,
     )
-    config = serializers.DictField(default=dict, required=False)
+    plugin_ids = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
+    config     = serializers.DictField(default=dict, required=False)
 
 
 class FindingSerializer(serializers.ModelSerializer):

@@ -8,6 +8,8 @@ from marketplace.services import has_module_access
 from billing.services import BillingService
 from .services import ai_service
 
+from .credit_service import InsufficientCreditsError
+
 class AIExplanationView(WorkspaceScopedViewMixin, views.APIView):
     """
     Returns an AI-generated explanation for a finding.
@@ -17,29 +19,34 @@ class AIExplanationView(WorkspaceScopedViewMixin, views.APIView):
     def post(self, request, finding_id):
         wid = self.get_workspace_id(request)
         finding = get_object_or_404(Finding, id=finding_id, scan__target__workspace_id=wid)
+        workspace = finding.scan.target.workspace
         
-        # Check if explanation already exists (caching in DB)
-        if finding.ai_explanation:
-            return Response({"explanation": finding.ai_explanation})
+        express = request.data.get("express", False)
+        
+        try:
+            explanation = ai_service.explain_finding(
+                finding.title, 
+                finding.description, 
+                finding.severity,
+                workspace=workspace,
+                user=request.user,
+                express=express
+            )
             
-        allowed, reason = BillingService.check_quota(finding.scan.target.workspace, "api_call")
-        if not allowed:
-            return Response({"detail": reason}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            # Save to DB if not already there
+            if not finding.ai_explanation:
+                finding.ai_explanation = explanation
+                finding.save(update_fields=['ai_explanation'])
+                
+            return Response({"explanation": explanation})
             
-        # Generate via service
-        explanation = ai_service.explain_finding(
-            finding.title, 
-            finding.description, 
-            finding.severity
-        )
-        
-        # Save to DB
-        finding.ai_explanation = explanation
-        finding.save()
-        
-        BillingService.increment_usage(finding.scan.target.workspace, "api_calls_count")
-        
-        return Response({"explanation": explanation})
+        except InsufficientCreditsError as e:
+            return Response({
+                "detail": "Créditos de IA insuficientes.",
+                "needed": e.needed,
+                "available": e.available,
+                "shortfall": e.shortfall
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
 class AIRemediationView(WorkspaceScopedViewMixin, views.APIView):
     """
@@ -50,25 +57,32 @@ class AIRemediationView(WorkspaceScopedViewMixin, views.APIView):
     def post(self, request, finding_id):
         wid = self.get_workspace_id(request)
         finding = get_object_or_404(Finding, id=finding_id, scan__target__workspace_id=wid)
+        workspace = finding.scan.target.workspace
         
-        if finding.ai_remediation:
-            return Response({"remediation": finding.ai_remediation})
+        express = request.data.get("express", False)
+        
+        try:
+            remediation = ai_service.generate_remediation_code(
+                finding.title, 
+                finding.description,
+                workspace=workspace,
+                user=request.user,
+                express=express
+            )
             
-        allowed, reason = BillingService.check_quota(finding.scan.target.workspace, "api_call")
-        if not allowed:
-            return Response({"detail": reason}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            if not finding.ai_remediation:
+                finding.ai_remediation = remediation
+                finding.save(update_fields=['ai_remediation'])
+                
+            return Response({"remediation": remediation})
             
-        remediation = ai_service.get_remediation_guide(
-            finding.title, 
-            finding.description
-        )
-        
-        finding.ai_remediation = remediation
-        finding.save()
-        
-        BillingService.increment_usage(finding.scan.target.workspace, "api_calls_count")
-        
-        return Response({"remediation": remediation})
+        except InsufficientCreditsError as e:
+            return Response({
+                "detail": "Créditos de IA insuficientes.",
+                "needed": e.needed,
+                "available": e.available,
+                "shortfall": e.shortfall
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
 class AIScanPredictionView(WorkspaceScopedViewMixin, views.APIView):
     """
@@ -80,27 +94,15 @@ class AIScanPredictionView(WorkspaceScopedViewMixin, views.APIView):
         from scans.models import Scan, Finding # noqa: PLC0415
         wid = self.get_workspace_id(request)
         scan = get_object_or_404(Scan, id=scan_id, target__workspace_id=wid)
+        workspace = scan.target.workspace
         
-        # Enforce Marketplace Gating
-        if not has_module_access(scan.target.workspace, "ai-intelligence"):
+        # Enforce Marketplace Gating (AI Intelligence module required for predictions)
+        if not has_module_access(workspace, "ai-intelligence"):
             return Response(
-                {"detail": "Marketplace Upgrade Required. Purchase the AI Intelligence module to unlock attack chain predictions."},
+                {"detail": "Upgrade de Marketplace necessário. Adquira o módulo 'AI Intelligence' para desbloquear previsões de cadeia de ataque."},
                 status=status.HTTP_403_FORBIDDEN
             )
             
-        allowed, reason = BillingService.check_quota(scan.target.workspace, "api_call")
-        if not allowed:
-            return Response({"detail": reason}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        
-        # Check cache in scan model (we'll need to add this field or use cache)
-        # For now, we'll use a local cache key to avoid hitting AI too often
-        from django.core.cache import cache # noqa: PLC0415
-        cache_key = f"ai_prediction_{scan_id}"
-        cached_prediction = cache.get(cache_key)
-        
-        if cached_prediction:
-            return Response({"prediction": cached_prediction})
-
         # Get findings for this scan
         findings_qs = Finding.objects.filter(scan=scan, status='active').order_by('-severity')[:15]
         findings_data = [
@@ -117,10 +119,22 @@ class AIScanPredictionView(WorkspaceScopedViewMixin, views.APIView):
                 "prediction": "Nenhum finding ativo encontrado para análise de cadeia de ataque."
             })
 
-        prediction = ai_service.predict_attack_chains(findings_data)
-        
-        # Cache the result for 1 hour
-        cache.set(cache_key, prediction, 3600)
-        BillingService.increment_usage(scan.target.workspace, "api_calls_count")
-        
-        return Response({"prediction": prediction})
+        express = request.data.get("express", False)
+
+        try:
+            prediction = ai_service.predict_attack_chains(
+                findings_data,
+                workspace=workspace,
+                user=request.user,
+                express=express
+            )
+            return Response({"prediction": prediction})
+            
+        except InsufficientCreditsError as e:
+            return Response({
+                "detail": "Créditos de IA insuficientes.",
+                "needed": e.needed,
+                "available": e.available,
+                "shortfall": e.shortfall
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+

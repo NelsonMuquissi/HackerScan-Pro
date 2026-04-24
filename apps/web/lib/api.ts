@@ -87,11 +87,25 @@ export async function createTarget(data: any): Promise<any> {
   });
 }
 
-export async function startScan(targetUrl: string, scanType: string = 'quick'): Promise<{ scan_id: string; status: string; target_host: string }> {
+export async function startScan(
+  targetUrl: string, 
+  scanType: string = 'quick', 
+  workspaceId?: string, 
+  pluginIds: string[] = []
+): Promise<{ scan_id: string; status: string; target_host: string }> {
   return fetchApi<{ scan_id: string; status: string; target_host: string }>('/scans/quick/', {
     method: 'POST',
-    body: JSON.stringify({ target_url: targetUrl, scan_type: scanType }),
+    body: JSON.stringify({ 
+      target_url: targetUrl, 
+      scan_type: scanType,
+      workspace_id: workspaceId,
+      plugin_ids: pluginIds
+    }),
   });
+}
+
+export async function listPlugins(): Promise<any[]> {
+  return fetchApi<any[]>('/scans/plugins/');
 }
 
 // Scheduling API
@@ -386,5 +400,53 @@ export async function createModuleCheckout(slug: string, workspaceId: string, da
   return fetchApi<{ checkout_url: string }>(`/marketplace/modules/${slug}/checkout/`, {
     method: 'POST',
     body: JSON.stringify({ ...data, workspace_id: cleanWorkspaceId }),
+  });
+}
+
+// AI Credit System API
+export async function getAIWallet(workspaceId: string): Promise<any> {
+  const url = workspaceId && workspaceId !== 'undefined' ? `/ai/wallet/?workspace_id=${workspaceId}` : '/ai/wallet/';
+  return fetchApi<any>(url);
+}
+
+export async function listAIPackages(): Promise<any[]> {
+  return fetchApi<any[]>('/ai/packages/');
+}
+
+export async function createAICheckoutSession(packageId: string, workspaceId: string): Promise<{ checkout_url: string }> {
+  return fetchApi<{ checkout_url: string }>('/ai/checkout/', {
+    method: 'POST',
+    body: JSON.stringify({ package_id: packageId, workspace_id: workspaceId }),
+  });
+}
+
+export async function listAITransactions(workspaceId: string): Promise<any[] | PaginatedResponse<any>> {
+  const url = workspaceId && workspaceId !== 'undefined' ? `/ai/transactions/?workspace_id=${workspaceId}` : '/ai/transactions/';
+  return fetchApi<any[] | PaginatedResponse<any>>(url);
+}
+
+export async function listAIAchievements(workspaceId: string): Promise<any[]> {
+  const url = workspaceId && workspaceId !== 'undefined' ? `/ai/achievements/?workspace_id=${workspaceId}` : '/ai/achievements/';
+  return fetchApi<any[]>(url);
+}
+
+export async function getAIExplanation(findingId: string, express: boolean = false): Promise<{ explanation: string }> {
+  return fetchApi<{ explanation: string }>(`/ai/explanation/${findingId}/`, {
+    method: 'POST',
+    body: JSON.stringify({ express }),
+  });
+}
+
+export async function getAIRemediation(findingId: string, express: boolean = false): Promise<{ remediation: string }> {
+  return fetchApi<{ remediation: string }>(`/ai/remediation/${findingId}/`, {
+    method: 'POST',
+    body: JSON.stringify({ express }),
+  });
+}
+
+export async function getAIScanPrediction(scanId: string, express: boolean = false): Promise<{ prediction: string }> {
+  return fetchApi<{ prediction: string }>(`/ai/predict/${scanId}/`, {
+    method: 'POST',
+    body: JSON.stringify({ express }),
   });
 }
