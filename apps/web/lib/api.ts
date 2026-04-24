@@ -450,3 +450,21 @@ export async function getAIScanPrediction(scanId: string, express: boolean = fal
     body: JSON.stringify({ express }),
   });
 }
+
+// Workspace & Team API
+export async function listWorkspaceMembers(workspaceId: string): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>(`/workspaces/${workspaceId}/members/`);
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function inviteToWorkspace(workspaceId: string, email: string, role: string = 'member'): Promise<any> {
+  return fetchApi<any>(`/workspaces/${workspaceId}/invites/`, {
+    method: 'POST',
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+export async function listAuditLogs(workspaceId: string): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>(`/workspaces/${workspaceId}/audit-logs/`);
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}

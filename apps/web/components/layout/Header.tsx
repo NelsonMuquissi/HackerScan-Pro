@@ -14,12 +14,10 @@ export function Header() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  const handleLogout = async () => {
-    setLoading(true);
-    // Give a tiny bit of time for the UI to show loading if needed, 
-    // but mostly we want to ensure state is cleared before redirect
+  const handleLogout = () => {
+    // Clear state and redirect immediately for maximum responsiveness
     logout();
-    router.replace('/login');
+    window.location.href = '/login';
   };
 
   useEffect(() => {

@@ -124,6 +124,12 @@ export default function SettingsPage() {
     alert('Copied to clipboard!');
   };
 
+  const handleTerminateSessions = () => {
+    if (confirm('Are you sure you want to terminate all active sessions? You will be logged out and all Nexus connections cleared.')) {
+      useAuthStore.getState().logout();
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -223,7 +229,10 @@ export default function SettingsPage() {
                      <span className="text-white">Just now</span>
                    </div>
                  </div>
-                 <button className="w-full mt-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-bold font-mono border border-red-500/20 rounded hover:bg-red-500/20 transition-all uppercase">
+                 <button 
+                    onClick={handleTerminateSessions}
+                    className="w-full mt-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-bold font-mono border border-red-500/20 rounded hover:bg-red-500/20 transition-all uppercase"
+                  >
                    Terminate Sessions
                  </button>
               </section>

@@ -13,7 +13,10 @@ export interface AIWallet {
   can_use_express: boolean;
 }
 
-export function useAICredits(workspaceId?: string) {
+export function useAICredits(providedWorkspaceId?: string) {
+  const storeWorkspaceId = useAuthStore((s) => s.workspaceId);
+  const workspaceId = providedWorkspaceId || storeWorkspaceId;
+
   const [wallet, setWallet] = useState<AIWallet | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<any[]>([]);
@@ -38,24 +41,25 @@ export function useAICredits(workspaceId?: string) {
     }
   }, [workspaceId]);
 
-  const fetchHistory = useCallback(async () => {
-    if (!workspaceId) return;
-    try {
-      const data = await listAITransactions(workspaceId);
-      // Handle paginated response if applicable
-      setTransactions(Array.isArray(data) ? data : (data as any).results || []);
-    } catch (err) {
-      console.error('Erro ao carregar histórico de transações', err);
-    }
-  }, [workspaceId]);
-
   const fetchAchievements = useCallback(async () => {
     if (!workspaceId) return;
     try {
       const data = await listAIAchievements(workspaceId);
-      setAchievements(data);
+      const achList = Array.isArray(data) ? data : (data as any)?.results ?? [];
+      setAchievements(achList);
     } catch (err) {
-      console.error('Erro ao carregar conquistas', err);
+      console.error('Error loading achievements:', err);
+    }
+  }, [workspaceId]);
+
+  const fetchHistory = useCallback(async () => {
+    if (!workspaceId) return;
+    try {
+      const data = await listAITransactions(workspaceId);
+      const txList = Array.isArray(data) ? data : (data as any)?.results ?? [];
+      setTransactions(txList);
+    } catch (err) {
+      console.error('Error loading transaction history:', err);
     }
   }, [workspaceId]);
 

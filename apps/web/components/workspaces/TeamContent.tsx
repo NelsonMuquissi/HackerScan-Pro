@@ -1,6 +1,4 @@
-'use client';
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Users, 
   Mail, 
@@ -10,27 +8,67 @@ import {
   Search,
   CheckCircle2,
   Clock,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-
-const MOCK_MEMBERS = [
-  { id: '1', name: 'John Doe', email: 'john@hackerscan.pro', role: 'OWNER', joined_at: '2026-01-10' },
-  { id: '2', name: 'Sarah Smith', email: 'sarah@hackerscan.pro', role: 'ADMIN', joined_at: '2026-02-15' },
-  { id: '3', name: 'Mike Johnson', email: 'mike@hackerscan.pro', role: 'MEMBER', joined_at: '2026-03-01' },
-];
-
-const MOCK_INVITES = [
-  { id: 'inv_1', email: 'external-auditor@gmail.com', role: 'VIEWER', expires_at: '2026-04-25', status: 'PENDING' }
-];
+import { listWorkspaceMembers, inviteToWorkspace } from '@/lib/api';
+import { useAuthStore } from '@/store/useAuthStore';
+import { toast } from 'react-hot-toast';
 
 export function TeamContent() {
-  const [members, setMembers] = useState(MOCK_MEMBERS);
-  const [invites, setInvites] = useState(MOCK_INVITES);
+  const workspaceId = useAuthStore((s) => s.workspaceId);
+  const [members, setMembers] = useState<any[]>([]);
+  const [invites, setInvites] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const loadTeam = async () => {
+    if (!workspaceId) return;
+    setLoading(true);
+    try {
+      const data = await listWorkspaceMembers(workspaceId);
+      setMembers(data);
+      // For now, let's assume invites are also handled or separate
+      // setInvites(invitesData);
+    } catch (err) {
+      console.error('Failed to load team:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTeam();
+  }, [workspaceId]);
+
+  const handleInvite = async () => {
+    if (!workspaceId || !inviteEmail) return;
+    setIsSubmitting(true);
+    try {
+      await inviteToWorkspace(workspaceId, inviteEmail, inviteRole.toLowerCase());
+      toast.success('INVITATION TRANSMITTED SUCCESSFULLY');
+      setIsInviteModalOpen(false);
+      setInviteEmail('');
+      setInviteRole('member');
+      // Refresh list or show pending
+      loadTeam();
+    } catch (err: any) {
+      toast.error(err.message || 'FAILED TO SEND INVITATION');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const filteredMembers = members.filter(m => 
+    m.user_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    m.user_full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="space-y-8 pb-10">
@@ -60,6 +98,8 @@ export function TeamContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
           <input 
             type="text" 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="SEARCH MEMBERS BY NAME OR EMAIL..."
             className="w-full bg-black/50 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-xs font-mono focus:border-neon-green/50 outline-none transition-all uppercase tracking-tighter"
           />
@@ -69,7 +109,7 @@ export function TeamContent() {
              <div className="w-8 h-8 rounded-full bg-neon-green/10 flex items-center justify-center">
                <Shield className="w-4 h-4 text-neon-green" />
              </div>
-             <span className="text-[10px] font-bold text-gray-400 font-mono uppercase">Quota: 8/10 Seats</span>
+             <span className="text-[10px] font-bold text-gray-400 font-mono uppercase">Quota: {members.length}/10 Seats</span>
           </div>
           <button className="text-[9px] font-bold text-neon-green hover:underline font-mono">UPGRADE</button>
         </div>
@@ -79,32 +119,34 @@ export function TeamContent() {
       <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden relative">
         <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center justify-between">
            <h3 className="text-[10px] font-bold font-mono tracking-[0.2em] text-gray-500 uppercase">Active Operators</h3>
-           <span className="text-[10px] font-bold font-mono text-neon-green px-2 py-0.5 rounded bg-neon-green/5 border border-neon-green/20">LIVE</span>
+           {loading ? <Loader2 className="w-3 h-3 text-neon-green animate-spin" /> : (
+             <span className="text-[10px] font-bold font-mono text-neon-green px-2 py-0.5 rounded bg-neon-green/5 border border-neon-green/20">LIVE</span>
+           )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <tbody className="divide-y divide-white/5">
-              {members.map((member) => (
+              {filteredMembers.length > 0 ? filteredMembers.map((member) => (
                 <tr key={member.id} className="group hover:bg-white/[0.01] transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-800 to-black border border-white/5 flex items-center justify-center font-bold text-gray-400">
-                        {member.name.charAt(0)}
+                        {(member.user_full_name || member.user_email).charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-foreground">{member.name}</div>
-                        <div className="text-[10px] text-gray-500 font-mono tracking-tighter uppercase">{member.email}</div>
+                        <div className="text-sm font-bold text-foreground">{member.user_full_name || 'Hacker Operator'}</div>
+                        <div className="text-[10px] text-gray-500 font-mono tracking-tighter uppercase">{member.user_email}</div>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <span className={cn(
                       "text-[9px] font-bold font-mono px-2 py-0.5 rounded border tracking-widest",
-                      member.role === 'OWNER' ? 'text-neon-green border-neon-green/20 bg-neon-green/5' :
-                      member.role === 'ADMIN' ? 'text-blue-400 border-blue-400/20 bg-blue-400/5' :
+                      member.role === 'owner' ? 'text-neon-green border-neon-green/20 bg-neon-green/5' :
+                      member.role === 'admin' ? 'text-blue-400 border-blue-400/20 bg-blue-400/5' :
                       'text-gray-400 border-white/10 bg-white/5'
                     )}>
-                      {member.role}
+                      {member.role.toUpperCase()}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -113,13 +155,19 @@ export function TeamContent() {
                      </button>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={3} className="px-6 py-10 text-center text-xs font-mono text-gray-600 uppercase tracking-widest">
+                    {loading ? 'Decrypting member list...' : 'No operators found in sector'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Pending Invites */}
+      {/* Pending Invites (MOCK UI for now since backend invite list isn't hooked up yet) */}
       {invites.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-[10px] font-bold font-mono tracking-[0.2em] text-gray-500 uppercase px-1">Pending Transmissions</h3>
@@ -177,6 +225,8 @@ export function TeamContent() {
                     <label className="text-[10px] font-bold font-mono text-gray-500 uppercase tracking-widest ml-1">Email Address</label>
                     <input 
                       type="email" 
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
                       placeholder="operator@company.com"
                       className="w-full bg-black border border-white/10 rounded-lg py-3 px-4 text-sm font-mono focus:border-neon-green/50 outline-none transition-all"
                     />
@@ -205,11 +255,17 @@ export function TeamContent() {
                   <div className="pt-4 flex gap-3">
                     <button 
                       onClick={() => setIsInviteModalOpen(false)}
+                      disabled={isSubmitting}
                       className="flex-1 py-3 rounded-lg font-bold text-xs bg-white/5 text-gray-400 hover:bg-white/10 transition-all uppercase tracking-widest"
                     >
                       Cancel
                     </button>
-                    <button className="flex-1 py-3 rounded-lg font-bold text-xs bg-neon-green text-black hover:opacity-90 transition-all uppercase tracking-widest">
+                    <button 
+                      onClick={handleInvite}
+                      disabled={isSubmitting || !inviteEmail}
+                      className="flex-1 py-3 rounded-lg font-bold text-xs bg-neon-green text-black hover:opacity-90 transition-all uppercase tracking-widest flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting && <Loader2 className="w-3 h-3 animate-spin" />}
                       Send Transmission
                     </button>
                   </div>
