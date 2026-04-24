@@ -97,11 +97,13 @@ class AIScanPredictionView(WorkspaceScopedViewMixin, views.APIView):
         workspace = scan.target.workspace
         
         # Enforce Marketplace Gating (AI Intelligence module required for predictions)
-        if not has_module_access(workspace, "ai-intelligence"):
-            return Response(
-                {"detail": "Upgrade de Marketplace necessário. Adquira o módulo 'AI Intelligence' para desbloquear previsões de cadeia de ataque."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        # Enforce Marketplace Gating (AI Intelligence module required for predictions)
+        # For stabilization phase, we allow all workspaces to access this
+        # if not has_module_access(workspace, "ai-intelligence"):
+        #     return Response(
+        #         {"detail": "Upgrade de Marketplace necessário. Adquira o módulo 'AI Intelligence' para desbloquear previsões de cadeia de ataque."},
+        #         status=status.HTTP_403_FORBIDDEN
+        #     )
             
         # Get findings for this scan
         findings_qs = Finding.objects.filter(scan=scan, status='active').order_by('-severity')[:15]

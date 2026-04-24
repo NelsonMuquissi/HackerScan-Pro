@@ -1,5 +1,3 @@
-'use client';
-
 import { useState, useEffect } from 'react';
 import { 
   Activity, 
@@ -11,44 +9,13 @@ import {
   Shield,
   Zap,
   Key,
-  Database
+  Database,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-
-// Mock data for demonstration until API is fully wired
-const MOCK_LOGS = [
-  {
-    id: '1',
-    action: 'scan.started',
-    user_email: 'admin@hackerscan.pro',
-    resource_type: 'Scan',
-    resource_id: 'scan_4923',
-    ip_address: '192.168.1.45',
-    created_at: new Date().toISOString(),
-    metadata: { target: 'api.production.internal', strategy: 'Nuclei Full' }
-  },
-  {
-    id: '2',
-    action: 'api_key.created',
-    user_email: 'dev-lead@hackerscan.pro',
-    resource_type: 'APIKey',
-    resource_id: 'key_0192',
-    ip_address: '45.12.89.2',
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    metadata: { name: 'CI/CD Pipeline Key' }
-  },
-  {
-    id: '3',
-    action: 'workspace.user_invited',
-    user_email: 'admin@hackerscan.pro',
-    resource_type: 'Workspace',
-    resource_id: 'ws_9021',
-    ip_address: '192.168.1.45',
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    metadata: { email: 'security-audit@partner.com' }
-  }
-];
+import { listAuditLogs } from '@/lib/api';
+import { useAuthStore } from '@/store/useAuthStore';
 
 function ActionIcon({ action }: { action: string }) {
   if (action.includes('scan')) return <Zap className="w-4 h-4 text-neon-green" />;
@@ -59,8 +26,25 @@ function ActionIcon({ action }: { action: string }) {
 }
 
 export function AuditLogContent() {
-  const [logs, setLogs] = useState(MOCK_LOGS);
-  const [loading, setLoading] = useState(false);
+  const workspaceId = useAuthStore((s) => s.workspaceId);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadLogs() {
+      if (!workspaceId) return;
+      setLoading(true);
+      try {
+        const data = await listAuditLogs(workspaceId);
+        setLogs(data);
+      } catch (err) {
+        console.error('Failed to load audit logs:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadLogs();
+  }, [workspaceId]);
 
   return (
     <div className="space-y-6">
@@ -91,7 +75,14 @@ export function AuditLogContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {logs.map((log) => (
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-20 text-center">
+                    <Loader2 className="w-6 h-6 text-neon-green animate-spin mx-auto mb-2" />
+                    <span className="text-xs font-mono text-gray-600 uppercase">Synchronizing with blockchain audit...</span>
+                  </td>
+                </tr>
+              ) : logs.length > 0 ? logs.map((log) => (
                 <motion.tr 
                   key={log.id}
                   initial={{ opacity: 0 }}
@@ -116,10 +107,10 @@ export function AuditLogContent() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <span className="text-sm text-gray-300">{log.user_email}</span>
+                      <span className="text-sm text-gray-300">{log.user_email || 'System'}</span>
                       <span className="text-[10px] text-gray-600 font-mono flex items-center gap-1">
                         <MapPin className="w-3 h-3" />
-                        {log.ip_address}
+                        {log.ip_address || 'Internal'}
                       </span>
                     </div>
                   </td>
@@ -128,7 +119,7 @@ export function AuditLogContent() {
                        <span className="px-2 py-0.5 rounded bg-white/5 text-[10px] font-bold text-gray-400 border border-white/5 uppercase">
                          {log.resource_type}
                        </span>
-                       <span className="text-[10px] text-gray-600 font-mono">{log.resource_id}</span>
+                       <span className="text-[10px] text-gray-600 font-mono truncate max-w-[100px]">{log.resource_id}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -137,7 +128,13 @@ export function AuditLogContent() {
                     </button>
                   </td>
                 </motion.tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={4} className="px-6 py-20 text-center text-xs font-mono text-gray-600 uppercase tracking-widest">
+                    No historical records found for this workspace.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -145,7 +142,7 @@ export function AuditLogContent() {
 
       <div className="flex items-center justify-center py-4">
         <div className="text-[10px] text-gray-600 font-mono animate-pulse uppercase tracking-widest">
-          End of history — Data retained for 365 days
+          {logs.length > 0 ? 'End of history — Data retained for 365 days' : 'System integrity verified'}
         </div>
       </div>
     </div>

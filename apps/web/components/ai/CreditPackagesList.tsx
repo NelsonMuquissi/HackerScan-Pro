@@ -31,7 +31,8 @@ export const CreditPackagesList: React.FC<{ workspaceId: string }> = ({ workspac
     async function load() {
       try {
         const data = await listAIPackages();
-        setPackages(data);
+        const pkgList = Array.isArray(data) ? data : (data as any)?.results ?? [];
+        setPackages(pkgList);
       } catch (err) {
         toast.error('Erro ao carregar pacotes de créditos');
       } finally {
