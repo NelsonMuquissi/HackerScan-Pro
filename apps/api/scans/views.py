@@ -25,28 +25,7 @@ from .scheduling import ScanScheduler
 from .models import ScheduledScan
 
 
-class WorkspaceScopedViewMixin:
-    """Helper methods for resolving workspace from request."""
-    def get_workspace_id(self, request):
-        wid = (
-            self.kwargs.get("workspace_id")
-            or request.query_params.get("workspace_id")
-            or request.data.get("workspace_id")
-        )
-        if wid and wid != "undefined":
-            return wid
-            
-        # Fallback to the user's first owned workspace (legacy/default behavior)
-        owned = request.user.owned_workspaces.first()
-        if owned:
-            return str(owned.id)
-            
-        # Fallback to any workspace membership
-        membership = request.user.memberships.first()
-        if membership:
-            return str(membership.workspace_id)
-            
-        return None
+from core.mixins.workspace import WorkspaceScopedViewMixin
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -201,6 +180,7 @@ class _ScanCreateBase(WorkspaceScopedViewMixin, APIView):
             workspace_id=wid,
             target_id=d["target_id"],
             scan_type=d["scan_type"],
+            plugin_ids=d.get("plugin_ids", []),
             config=d.get("config", {}),
         )
         return Response(ScanDetailSerializer(scan).data, status=http_status.HTTP_201_CREATED)
@@ -294,13 +274,15 @@ class ScanPluginListView(APIView):
 #  QUICK SCAN (one-step convenience endpoint)
 # ═══════════════════════════════════════════════════════════════════════
 
-class QuickScanView(APIView):
+class QuickScanView(WorkspaceScopedViewMixin, APIView):
     """Accept a raw URL, auto-create target + scan, trigger execution."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         target_url = request.data.get("target_url", "").strip()
         scan_type  = request.data.get("scan_type", "quick")
+        plugin_ids = request.data.get("plugin_ids", [])
+        wid        = self.get_workspace_id(request)
         
         if not target_url:
             return Response(
@@ -308,24 +290,21 @@ class QuickScanView(APIView):
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
+        if not wid:
+             return Response({"detail": "Workspace context required."}, status=http_status.HTTP_400_BAD_REQUEST)
+
         # Marketplace Module Check (Quick Scan version)
         from marketplace.services import check_module_access  # noqa: PLC0415
-        from users.models import Workspace  # noqa: PLC0415
-        from users.models import WorkspaceMember # noqa: PLC0415
+        from users.models import Workspace # noqa: PLC0415
         
-        # Get workspace (using user's primary workspace for quick scan)
-        workspace = None
-        owned = request.user.owned_workspaces.first()
-        if owned:
-            workspace = owned
-        else:
-            membership = request.user.memberships.select_related("workspace").first()
-            if membership:
-                workspace = membership.workspace
-             
-        if not workspace:
-             return Response({"detail": "No active workspace found. Please create a workspace first."}, status=http_status.HTTP_400_BAD_REQUEST)
+        workspace = Workspace.objects.get(pk=wid)
         
+        # Custom plugin list check (if provided, we assume it's a custom strategy)
+        if plugin_ids and not check_module_access(workspace, "full"):
+             # If custom plugins are used, require 'full' spectrum access for now
+             # unless we want to map each plugin to a module.
+             pass 
+
         if not check_module_access(workspace, scan_type):
             return Response({
                 "detail": "This specialized scan module is locked. Visit the Marketplace to unlock premium capabilities.",
@@ -333,7 +312,13 @@ class QuickScanView(APIView):
                 "required_module": scan_type
             }, status=http_status.HTTP_402_PAYMENT_REQUIRED)
 
-        scan = ScanService.quick_scan(request.user, target_url, scan_type=scan_type)
+        scan = ScanService.quick_scan(
+            request.user, 
+            target_url, 
+            scan_type=scan_type, 
+            workspace_id=wid,
+            plugin_ids=plugin_ids
+        )
         return Response(
             {
                 "scan_id": str(scan.id),

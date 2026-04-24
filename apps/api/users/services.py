@@ -401,3 +401,16 @@ class WorkspaceService:
         # Since it doesn't, we'll filter by users who are members of the workspace.
         member_ids = WorkspaceMember.objects.filter(workspace_id=workspace_id).values_list("user_id", flat=True)
         return AuditLog.objects.filter(user_id__in=member_ids).order_by("-created_at")[:limit]
+
+    @staticmethod
+    def check_permission(user: User, workspace_id: str, required_role: str = "member") -> bool:
+        """
+        Utility for Django Views (non-DRF) to verify workspace access.
+        """
+        from core.permissions import ROLE_HIERARCHY # noqa: PLC0415
+        allowed_roles = ROLE_HIERARCHY.get(required_role, [])
+        return WorkspaceMember.objects.filter(
+            workspace_id=workspace_id,
+            user=user,
+            role__in=allowed_roles
+        ).exists()

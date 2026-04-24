@@ -7,25 +7,31 @@ import { RecentScans } from '@/components/dashboard/RecentScans';
 import { SeverityHeatmap } from '@/components/dashboard/SeverityHeatmap';
 import { TerminalOutput } from '@/components/TerminalOutput';
 import { Activity, ShieldAlert, Bug, Target, Terminal, Zap, ShieldCheck, Lock, Loader2, ExternalLink } from 'lucide-react';
-import { startScan, getDashboardStats, type DashboardStats } from '@/lib/api';
+import { startScan, getDashboardStats, listPlugins, type DashboardStats } from '@/lib/api';
 import Link from 'next/link';
 
 export default function DashboardPage() {
   const searchParams = useSearchParams();
   const scanQueryParam = searchParams.get('scan');
   
-  const [activeScanId, setActiveScanId] = useState<string | null>(scanQueryParam);
+   const [activeScanId, setActiveScanId] = useState<string | null>(scanQueryParam);
   const [targetUrl, setTargetUrl] = useState('');
   const [scanType, setScanType] = useState('quick');
+  const [availablePlugins, setAvailablePlugins] = useState<any[]>([]);
+  const [selectedPlugins, setSelectedPlugins] = useState<string[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsError, setStatsError] = useState(false);
 
-  // Initial stats load
+   // Initial stats and plugins load
   useEffect(() => {
     getDashboardStats()
       .then(setStats)
       .catch(() => setStatsError(true));
+      
+    listPlugins()
+      .then(setAvailablePlugins)
+      .catch(console.error);
   }, []);
 
   // Auto-refresh stats every 5s while a scan is active so Recent Scans and counters update live
@@ -42,21 +48,25 @@ export default function DashboardPage() {
     getDashboardStats().then(setStats).catch(() => {});
   };
 
-  const handleStartScan = async (e: React.FormEvent) => {
+   const handleStartScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetUrl) return;
+    if (scanType === 'custom' && selectedPlugins.length === 0) {
+      alert('Select at least one plugin for custom scan.');
+      return;
+    }
 
     try {
       setIsScanning(true);
-      const res = await startScan(targetUrl, scanType);
+      // For custom scans, we send 'full' as scanType if it requires deep inspection, 
+      // or just 'custom'. The backend handles prioritized plugin_ids.
+      const res = await startScan(targetUrl, scanType, undefined, selectedPlugins);
       setActiveScanId(res.scan_id);
-      // Alert removed to avoid native browser popup blocking user flow, visual update is enough
       // Refresh dashboard stats after starting a scan
       setTimeout(refreshStats, 2000);
     } catch (error: any) {
       console.error('Failed to start scan', error);
       
-      // Handle marketplace locking
       if (error.status === 402) {
         alert('PREMIUM MODULE REQUIRED\nThis tactical strategy is locked. Redirecting to Marketplace...');
         setTimeout(() => window.location.href = '/dashboard/marketplace', 3000);
@@ -66,6 +76,14 @@ export default function DashboardPage() {
     } finally {
       setIsScanning(false);
     }
+  };
+
+  const togglePlugin = (pluginId: string) => {
+    setSelectedPlugins(prev => 
+      prev.includes(pluginId) 
+        ? prev.filter(p => p !== pluginId) 
+        : [...prev, pluginId]
+    );
   };
 
   return (
@@ -95,10 +113,11 @@ export default function DashboardPage() {
                 onChange={(e) => setScanType(e.target.value)}
                 className="bg-[#0a0a0a] border border-white/5 rounded-lg px-4 py-3 font-mono text-[10px] focus:outline-none focus:border-neon-green/50 text-gray-400 uppercase tracking-widest"
               >
-                <option value="quick">QUICK SCOPE</option>
+                 <option value="quick">QUICK SCOPE</option>
                 <option value="full">FULL SPECTRUM</option>
                 <option value="vuln">VULN RESEARCH</option>
                 <option value="recon">RECON & DISCOVERY</option>
+                <option value="custom">CUSTOM PLUGINS</option>
                 <option value="ad_audit">AD TACTICAL [PREMIUM]</option>
                 <option value="k8s_security">K8S HARDENING [PREMIUM]</option>
                 <option value="sap_audit">SAP ECOSYSTEM [PREMIUM]</option>
@@ -114,6 +133,38 @@ export default function DashboardPage() {
               </button>
             </div>
           </form>
+
+          {scanType === 'custom' && (
+            <div className="bg-[#0a0a0a] border border-white/5 rounded-lg p-4 animate-in fade-in slide-in-from-top-2">
+              <h3 className="text-[10px] font-mono font-bold text-gray-500 mb-3 uppercase tracking-widest">Select Tactical Modules</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {availablePlugins.length > 0 ? availablePlugins.map(plugin => (
+                  <label key={plugin.plugin_id} className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-all ${
+                    selectedPlugins.includes(plugin.plugin_id) 
+                      ? 'border-neon-green/50 bg-neon-green/5' 
+                      : 'border-white/5 bg-transparent hover:border-white/10'
+                  }`}>
+                    <input 
+                      type="checkbox" 
+                      className="hidden"
+                      checked={selectedPlugins.includes(plugin.plugin_id)}
+                      onChange={() => togglePlugin(plugin.plugin_id)}
+                    />
+                    <div className={`w-3 h-3 rounded-sm border ${
+                      selectedPlugins.includes(plugin.plugin_id) ? 'bg-neon-green border-neon-green' : 'border-gray-600'
+                    }`} />
+                    <span className={`text-[9px] font-mono uppercase truncate ${
+                      selectedPlugins.includes(plugin.plugin_id) ? 'text-neon-green' : 'text-gray-400'
+                    }`}>
+                      {plugin.name}
+                    </span>
+                  </label>
+                )) : (
+                  <p className="text-[10px] font-mono text-gray-600 col-span-full italic">Scanning local strategy directory...</p>
+                )}
+              </div>
+            </div>
+          )}
           
           <div className="flex items-center gap-4 text-[9px] font-mono text-gray-600 uppercase tracking-tighter">
             <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-neon-green" /> End-to-end Encrypted</span>

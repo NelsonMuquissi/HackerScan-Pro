@@ -1,11 +1,12 @@
 'use client';
 
-import { User, ShieldCheck, CreditCard, LogOut, Bell } from 'lucide-react';
+import { User, ShieldCheck, CreditCard, LogOut, Bell, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSubscription } from '@/lib/api';
 import { useAuthStore } from '@/store/useAuthStore';
 import { NotificationCenter } from './NotificationCenter';
+import { AICreditBadge } from '../ai/AICreditBadge';
 import Link from 'next/link';
 
 export function Header() {
@@ -13,9 +14,12 @@ export function Header() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    setLoading(true);
+    // Give a tiny bit of time for the UI to show loading if needed, 
+    // but mostly we want to ensure state is cleared before redirect
     logout();
-    router.push('/login');
+    router.replace('/login');
   };
 
   useEffect(() => {
@@ -52,6 +56,7 @@ export function Header() {
         )}
       </div>
       <div className="flex items-center gap-4">
+        <AICreditBadge className="mr-2" />
         <Link href="/dashboard/billing/usage" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 mr-2">
           <ShieldCheck className="w-4 h-4" />
           <span className="text-xs font-medium hidden sm:block">Usage</span>
@@ -68,8 +73,17 @@ export function Header() {
             <User className="w-5 h-5" />
           </div>
           <span className="text-sm font-mono text-foreground hidden md:block">{user?.name || 'Admin'}</span>
-          <button onClick={handleLogout} className="ml-2 text-gray-400 hover:text-red-500 transition-colors" title="Logout">
-            <LogOut className="w-5 h-5" />
+          <button 
+            onClick={handleLogout} 
+            disabled={loading}
+            className="ml-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50" 
+            title="Logout"
+          >
+            {loading ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <LogOut className="w-5 h-5" />
+            )}
           </button>
         </div>
       </div>

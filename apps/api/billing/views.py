@@ -11,6 +11,7 @@ Endpoints:
   GET    /v1/billing/usage/          → current period usage
   POST   /v1/billing/portal/         → Stripe customer portal URL
 """
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView

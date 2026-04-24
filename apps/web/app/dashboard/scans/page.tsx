@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Shield, ShieldAlert, ShieldCheck, Loader2, ExternalLink } from 'lucide-react';
 import { listScans } from '@/lib/api';
 
@@ -28,6 +29,7 @@ const statusBadge: Record<string, { bg: string; text: string }> = {
 };
 
 export default function ScansPage() {
+  const router = useRouter();
   const [scans, setScans] = useState<ScanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -119,7 +121,7 @@ export default function ScansPage() {
                     <td className="px-4 py-3 text-center">
                       <button
                         className="text-neon-green hover:underline text-xs inline-flex items-center gap-1"
-                        onClick={() => window.location.href = `/dashboard/scans/${scan.id}`}
+                        onClick={() => router.push(`/dashboard/scans/${scan.id}`)}
                       >
                         View <ExternalLink className="w-3 h-3" />
                       </button>

@@ -17,10 +17,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { getScan, getFindings, generateReport, getReport } from '@/lib/api';
+import { getScan, getFindings, generateReport, getReport, explainFindingAI, remediateFindingAI } from '@/lib/api';
 import Link from 'next/link';
 import { AIAnalysisSection } from './AIAnalysisSection';
 import { FindingEvidence } from './FindingEvidence';
+import { InsufficientCreditsModal } from '../ai/InsufficientCreditsModal';
 
 interface ScanDetailContentProps {
   scanId: string;
@@ -33,6 +34,29 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
   const [exporting, setExporting] = useState<string | null>(null);
   const [reportStatus, setReportStatus] = useState<string | null>(null);
   const [expandedFindings, setExpandedFindings] = useState<Record<string, boolean>>({});
+  const [aiLoading, setAiLoading] = useState<Record<string, string | null>>({});
+  const [creditError, setCreditError] = useState<any>(null);
+
+  const handleAIAction = async (findingId: string, action: 'explain' | 'remediate') => {
+    setAiLoading(prev => ({ ...prev, [findingId]: action }));
+    setCreditError(null);
+    try {
+      const data = action === 'explain' 
+        ? await explainFindingAI(findingId)
+        : await remediateFindingAI(findingId);
+      
+      // Update the finding in the state
+      setFindings(prev => prev.map(f => f.id === findingId ? { ...f, ...data } : f));
+    } catch (err: any) {
+      if (err.status === 402) {
+        setCreditError(err.data || { needed: 0, available: 0, shortfall: 0 });
+      } else {
+        console.error(`AI ${action} failed:`, err);
+      }
+    } finally {
+      setAiLoading(prev => ({ ...prev, [findingId]: null }));
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -301,33 +325,54 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
 
                       
                       {/* AI Insights */}
-                      {(f.ai_explanation || f.ai_remediation) && (
-                        <div className="bg-neon-green-dim border border-neon-green/30 p-4 rounded-lg space-y-4">
-                          {f.ai_explanation && (
-                            <div className="space-y-2">
-                              <h4 className="text-[10px] font-bold text-neon-green uppercase tracking-tighter flex items-center gap-2">
-                                <Zap className="w-3 h-3 fill-neon-green" />
-                                AI-POWERED THREAT ANALYSIS
-                              </h4>
-                              <p className="text-sm text-neon-green/90 leading-snug">
-                                {f.ai_explanation}
-                              </p>
-                            </div>
-                          )}
-                          
-                          {f.ai_remediation && (
-                            <div className="space-y-2 pt-2 border-t border-neon-green/20">
-                              <h4 className="text-[10px] font-bold text-neon-green uppercase tracking-tighter flex items-center gap-2">
-                                <Shield className="w-3 h-3 fill-neon-green" />
-                                AI ADVISORY: STEP-BY-STEP REMEDIATION
-                              </h4>
-                              <div className="text-sm text-neon-green/80 leading-relaxed whitespace-pre-wrap">
-                                {f.ai_remediation}
+                      <div className="space-y-4">
+                        {(f.ai_explanation || f.ai_remediation) ? (
+                          <div className="bg-neon-green-dim border border-neon-green/30 p-4 rounded-lg space-y-4 shadow-[0_0_15px_rgba(57,255,20,0.05)]">
+                            {f.ai_explanation && (
+                              <div className="space-y-2">
+                                <h4 className="text-[10px] font-bold text-neon-green uppercase tracking-tighter flex items-center gap-2">
+                                  <Zap className="w-3 h-3 fill-neon-green" />
+                                  AI-POWERED THREAT ANALYSIS
+                                </h4>
+                                <p className="text-sm text-neon-green/90 leading-snug">
+                                  {f.ai_explanation}
+                                </p>
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                            )}
+                            
+                            {f.ai_remediation && (
+                              <div className="space-y-2 pt-2 border-t border-neon-green/20">
+                                <h4 className="text-[10px] font-bold text-neon-green uppercase tracking-tighter flex items-center gap-2">
+                                  <Shield className="w-3 h-3 fill-neon-green" />
+                                  AI ADVISORY: STEP-BY-STEP REMEDIATION
+                                </h4>
+                                <div className="text-sm text-neon-green/80 leading-relaxed whitespace-pre-wrap font-mono text-[13px]">
+                                  {f.ai_remediation}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-3">
+                            <button 
+                              onClick={() => handleAIAction(f.id, 'explain')}
+                              disabled={!!aiLoading[f.id]}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-neon-green/10 border border-neon-green/30 text-neon-green rounded text-[10px] font-bold uppercase tracking-widest hover:bg-neon-green/20 transition-all disabled:opacity-50"
+                            >
+                              {aiLoading[f.id] === 'explain' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                              EXPLIQUE ESTE RISCO COM IA
+                            </button>
+                            <button 
+                              onClick={() => handleAIAction(f.id, 'remediate')}
+                              disabled={!!aiLoading[f.id]}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded text-[10px] font-bold uppercase tracking-widest hover:bg-blue-500/20 transition-all disabled:opacity-50"
+                            >
+                              {aiLoading[f.id] === 'remediate' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Shield className="w-3 h-3" />}
+                              GERAR REMEDIAÇÃO PERSONALIZADA
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </motion.div>
                 )}
@@ -336,6 +381,14 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
           ))}
         </div>
       </div>
+
+      <InsufficientCreditsModal 
+        isOpen={!!creditError} 
+        onClose={() => setCreditError(null)} 
+        needed={creditError?.needed || 0}
+        available={creditError?.available || 0}
+        shortfall={creditError?.shortfall || 0}
+      />
     </div>
   );
 }
