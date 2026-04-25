@@ -11,10 +11,12 @@ interface User {
 interface AuthState {
   user: User | null;
   token: string | null;
+  workspaceId: string | null;
   isAuthenticated: boolean;
-  login: (user: User, token: string) => void;
+  login: (user: User, token: string, workspaceId?: string) => void;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
+  setWorkspaceId: (id: string | null) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -22,22 +24,29 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       token: null,
+      workspaceId: null,
       isAuthenticated: false,
-      login: (user, token) => set({ user, token, isAuthenticated: true }),
+      login: (user, token, workspaceId) => set({ 
+        user, 
+        token, 
+        workspaceId: workspaceId || (user as any).workspace_id || null,
+        isAuthenticated: true 
+      }),
       logout: () => {
-        set({ user: null, token: null, isAuthenticated: false });
-        // Optional: clear localStorage if needed, but persist middleware handles it
+        set({ user: null, token: null, workspaceId: null, isAuthenticated: false });
       },
       updateUser: (userData) => set((state) => ({
         user: state.user ? { ...state.user, ...userData } : null
       })),
+      setWorkspaceId: (id) => set({ workspaceId: id }),
     }),
     {
-      name: 'hacker-scan-auth', // key in localStorage
+      name: 'hacker-scan-auth',
       skipHydration: true,
       partialize: (state) => ({
         user: state.user,
         token: state.token,
+        workspaceId: state.workspaceId,
         isAuthenticated: state.isAuthenticated,
       }),
     }

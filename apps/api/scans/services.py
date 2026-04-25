@@ -111,6 +111,20 @@ class ScanService:
         # Increment usage counter
         BillingService.increment_usage(target.workspace, "scans_count")
         
+        from users.models import AuditLog
+        AuditLog.log(
+            user=user,
+            action="scan.create",
+            workspace=target.workspace,
+            target_id=scan.id,
+            target_type="scan",
+            metadata={
+                "target_host": target.host,
+                "scan_type": scan_type,
+                "config": config
+            }
+        )
+
         return scan
 
     @staticmethod
@@ -129,6 +143,17 @@ class ScanService:
 
         run_scan.delay(str(scan.id))
         logger.info("ScanService.trigger: queued scan %s via Celery", scan.id)
+
+        from users.models import AuditLog
+        AuditLog.log(
+            user=scan.triggered_by,
+            action="scan.trigger",
+            workspace=scan.target.workspace,
+            target_id=scan.id,
+            target_type="scan",
+            metadata={"target_host": scan.target.host}
+        )
+
         return scan
 
     @staticmethod
@@ -148,6 +173,17 @@ class ScanService:
 
         scan.status = ScanStatus.CANCELLED
         scan.save(update_fields=["status"])
+
+        from users.models import AuditLog
+        AuditLog.log(
+            user=None, # System action or user context if available
+            action="scan.cancel",
+            workspace=scan.target.workspace,
+            target_id=scan.id,
+            target_type="scan",
+            metadata={"target_host": scan.target.host}
+        )
+
         return scan
 
     @staticmethod
@@ -248,4 +284,15 @@ class ScanService:
 
         run_scan.delay(str(scan.id))
         logger.info("ScanService.quick_scan: queued scan %s for %s in workspace %s", scan.id, host, workspace.id)
+
+        from users.models import AuditLog
+        AuditLog.log(
+            user=user,
+            action="scan.quick_create",
+            workspace=workspace,
+            target_id=scan.id,
+            target_type="scan",
+            metadata={"target_host": host, "scan_type": scan_type}
+        )
+
         return scan

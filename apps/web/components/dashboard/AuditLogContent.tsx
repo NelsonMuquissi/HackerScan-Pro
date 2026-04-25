@@ -18,10 +18,11 @@ import { listAuditLogs } from '@/lib/api';
 import { useAuthStore } from '@/store/useAuthStore';
 
 function ActionIcon({ action }: { action: string }) {
-  if (action.includes('scan')) return <Zap className="w-4 h-4 text-neon-green" />;
-  if (action.includes('key')) return <Key className="w-4 h-4 text-blue-400" />;
-  if (action.includes('user')) return <User className="w-4 h-4 text-purple-400" />;
-  if (action.includes('workspace')) return <Shield className="w-4 h-4 text-neon-yellow" />;
+  const a = action || '';
+  if (a.includes('scan')) return <Zap className="w-4 h-4 text-neon-green" />;
+  if (a.includes('key')) return <Key className="w-4 h-4 text-blue-400" />;
+  if (a.includes('user')) return <User className="w-4 h-4 text-purple-400" />;
+  if (a.includes('workspace')) return <Shield className="w-4 h-4 text-neon-yellow" />;
   return <Activity className="w-4 h-4 text-gray-400" />;
 }
 
@@ -29,21 +30,33 @@ export function AuditLogContent() {
   const workspaceId = useAuthStore((s) => s.workspaceId);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadLogs() {
-      if (!workspaceId) return;
-      setLoading(true);
+      if (!workspaceId || workspaceId === 'undefined') {
+        if (isMounted) setLoading(false);
+        return;
+      }
+      
+      if (isMounted) {
+        setLoading(true);
+        setError(null);
+      }
+      
       try {
         const data = await listAuditLogs(workspaceId);
-        setLogs(data);
-      } catch (err) {
+        if (isMounted) setLogs(data || []);
+      } catch (err: any) {
         console.error('Failed to load audit logs:', err);
+        if (isMounted) setError(err.message || 'Failed to synchronise with blockchain audit.');
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
     loadLogs();
+    return () => { isMounted = false; };
   }, [workspaceId]);
 
   return (
@@ -82,6 +95,12 @@ export function AuditLogContent() {
                     <span className="text-xs font-mono text-gray-600 uppercase">Synchronizing with blockchain audit...</span>
                   </td>
                 </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-20 text-center text-xs font-mono text-red-500 uppercase tracking-widest">
+                    {error}
+                  </td>
+                </tr>
               ) : logs.length > 0 ? logs.map((log) => (
                 <motion.tr 
                   key={log.id}
@@ -96,11 +115,11 @@ export function AuditLogContent() {
                       </div>
                       <div>
                         <div className="text-sm font-bold border-b border-transparent group-hover:border-neon-green/30 transition-all inline-block">
-                          {log.action.replace('.', ': ').toUpperCase()}
+                          {(log.action || 'unknown').replace('.', ': ').toUpperCase()}
                         </div>
                         <div className="text-[10px] text-gray-500 font-mono mt-1 flex items-center gap-1">
                           <Clock className="w-3 h-3" />
-                          {new Date(log.created_at).toLocaleString()}
+                          {log.created_at ? new Date(log.created_at).toLocaleString() : 'Recent'}
                         </div>
                       </div>
                     </div>
@@ -117,9 +136,9 @@ export function AuditLogContent() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                        <span className="px-2 py-0.5 rounded bg-white/5 text-[10px] font-bold text-gray-400 border border-white/5 uppercase">
-                         {log.resource_type}
+                         {log.resource_type || 'N/A'}
                        </span>
-                       <span className="text-[10px] text-gray-600 font-mono truncate max-w-[100px]">{log.resource_id}</span>
+                       <span className="text-[10px] text-gray-600 font-mono truncate max-w-[100px]">{log.resource_id || '---'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">

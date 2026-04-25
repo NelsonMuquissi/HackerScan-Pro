@@ -11,7 +11,7 @@ class TestRegisterEndpoint:
     @patch("users.services.UserService._send_verification_email")
     def test_register_returns_201(self, _, api_client, db):
         res = api_client.post("/v1/auth/register/", {
-            "email": "new@test.com",
+            "email": "new@example.com",
             "password": "SecurePass123!",
             "full_name": "New User",
         }, format="json")
@@ -29,7 +29,7 @@ class TestRegisterEndpoint:
 
     def test_register_weak_password_returns_400(self, api_client, db):
         res = api_client.post("/v1/auth/register/", {
-            "email": "weak@test.com",
+            "email": "weak@example.com",
             "password": "12345",
             "full_name": "Weak",
         }, format="json")

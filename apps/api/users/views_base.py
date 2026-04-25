@@ -1,6 +1,7 @@
 import json
 from django.views import View
 from django.http import JsonResponse
+from django.core.exceptions import ValidationError
 from core.exceptions import ServiceError, api_exception_response
 
 class BaseView(View):
@@ -32,6 +33,13 @@ class BaseView(View):
             return super().dispatch(request, *args, **kwargs)
         except ServiceError as e:
             return api_exception_response(e)
+        except ValidationError as e:
+            return JsonResponse({
+                "error": True,
+                "code": "validation_error",
+                "message": str(e),
+                "detail": getattr(e, 'message_dict', str(e))
+            }, status=400)
         except Exception as e:
             # Handle DRF ValidationError if it's raised by serializers
             if e.__class__.__name__ == "ValidationError" and hasattr(e, "detail"):
@@ -54,7 +62,8 @@ class BaseView(View):
     def success_response(self, data=None, status=200):
         """Return a successful JSON response."""
         response_data = data or {}
-        return JsonResponse(response_data, status=status)
+        # safe=False allows non-dict objects (like lists from serializers)
+        return JsonResponse(response_data, status=status, safe=False)
 
     def error_response(self, message, code="error", detail=None, status=400):
         """Return an error JSON response."""

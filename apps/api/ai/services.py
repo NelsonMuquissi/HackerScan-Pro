@@ -46,6 +46,31 @@ VULNERABILITY_KB = {
         "risk": "Violação de privacidade (LGPD), auxílio em ataques direcionados e perda de confiança do cliente.",
         "remediation": "Criptografar dados sensíveis em repouso e em trânsito. Desativar logs detalhados em produção e mascarar dados sensíveis.",
     },
+    "csp": {
+        "explanation": "A falta do cabeçalho Content-Security-Policy (CSP) deixa a aplicação vulnerável a ataques de injeção de conteúdo, como XSS e Clickjacking.",
+        "risk": "Execução de scripts não autorizados, roubo de dados e manipulação da interface do usuário.",
+        "remediation": "Implementar uma política CSP restritiva através do cabeçalho HTTP 'Content-Security-Policy'.",
+    },
+    "hsts": {
+        "explanation": "O cabeçalho HTTP Strict Transport Security (HSTS) não está configurado, o que pode permitir ataques de downgrade de protocolo (HTTP em vez de HTTPS).",
+        "risk": "Interceptação de tráfego em ataques Man-in-the-Middle (MitM) e roubo de cookies de sessão.",
+        "remediation": "Adicionar o cabeçalho 'Strict-Transport-Security' com um tempo de 'max-age' longo e a diretiva 'includeSubDomains'.",
+    },
+    "clickjacking": {
+        "explanation": "A ausência de proteção contra Clickjacking (como X-Frame-Options ou diretiva frame-ancestors do CSP) permite que o site seja carregado dentro de um iframe em sites maliciosos.",
+        "risk": "Usuários podem ser induzidos a clicar em elementos invisíveis, realizando ações indesejadas em seu nome.",
+        "remediation": "Configurar o cabeçalho 'X-Frame-Options: DENY' ou 'SAMEORIGIN', ou utilizar a diretiva 'frame-ancestors' no CSP.",
+    },
+    "tls_version": {
+        "explanation": "O servidor suporta versões obsoletas e inseguras do protocolo TLS (como 1.0 ou 1.1).",
+        "risk": "Criptografia fraca que pode ser quebrada por atacantes, expondo dados em trânsito.",
+        "remediation": "Desativar suporte para TLS 1.0 e 1.1. Manter apenas TLS 1.2 e 1.3 com cifras fortes.",
+    },
+    "open_port": {
+        "explanation": "Uma porta de rede foi encontrada aberta sem uma justificativa clara de serviço público.",
+        "risk": "Aumento da superfície de ataque. Portas desnecessárias podem expor serviços vulneráveis ou painéis administrativos.",
+        "remediation": "Fechar todas as portas que não são estritamente necessárias. Utilizar VPN ou listas brancas de IP para serviços internos.",
+    },
     "default": {
         "explanation": "Esta vulnerabilidade requer atenção imediata para prevenir possíveis explorações.",
         "risk": "O risco acumulado de falhas de segurança pode levar ao comprometimento da integridade e confidencialidade dos dados.",
@@ -331,11 +356,27 @@ class AIService:
     def _get_kb_entry(self, title: str) -> dict:
         """Tenta encontrar uma entrada correspondente na base de conhecimento estática."""
         t = title.lower()
+        
+        # 1. Specific Web Headers (Check these before "port" to avoid "Transport" match)
+        if "content-security-policy" in t or "csp" in t: return VULNERABILITY_KB["csp"]
+        if "strict-transport-security" in t or "hsts" in t: return VULNERABILITY_KB["hsts"]
+        if "frame-options" in t or "clickjacking" in t or "x-frame" in t: return VULNERABILITY_KB["clickjacking"]
+        
+        # 2. Network / Ports (Use regex for word boundary)
+        if re.search(r"\b(port|porta)\b", t): return VULNERABILITY_KB["open_port"]
+        
+        # 3. Injection
         if "sql" in t: return VULNERABILITY_KB["sql_injection"]
         if "xss" in t or "scripting" in t: return VULNERABILITY_KB["xss"]
+        
+        # 4. Auth / IDOR
         if "auth" in t or "login" in t or "password" in t: return VULNERABILITY_KB["broken_auth"]
         if "idor" in t or "direct object" in t: return VULNERABILITY_KB["idor"]
+        
+        # 5. Info / Encryption
         if "info" in t or "exposure" in t or "leak" in t: return VULNERABILITY_KB["info_exposure"]
+        if "tls" in t or "ssl" in t or "cryptography" in t: return VULNERABILITY_KB["tls_version"]
+        
         return VULNERABILITY_KB["default"]
 
     def _fallback_explanation(self, title: str, severity: str) -> str:

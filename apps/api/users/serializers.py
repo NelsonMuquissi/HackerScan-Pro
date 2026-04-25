@@ -177,7 +177,7 @@ class WorkspaceMemberSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WorkspaceMember
-        fields = ["id", "user_email", "user_name", "role", "joined_at"]
+        fields = ["id", "user_email", "user_name", "role", "created_at"]
         read_only_fields = fields
 
 
@@ -189,7 +189,7 @@ class WorkspaceInviteSerializer(serializers.ModelSerializer):
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
-    user_email = serializers.EmailField(source="user.email", read_only=True, default="System")
+    user_email = serializers.SerializerMethodField()
 
     class Meta:
         from .models import AuditLog
@@ -199,3 +199,6 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "resource_id", "ip_address", "created_at", "metadata"
         ]
         read_only_fields = fields
+
+    def get_user_email(self, obj):
+        return obj.user.email if obj.user else "System"

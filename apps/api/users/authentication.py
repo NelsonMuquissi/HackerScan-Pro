@@ -30,6 +30,9 @@ class CustomJWTAuthentication(BaseAuthentication):
         except ValueError as e:
             raise AuthenticationFailed(str(e), code="authentication_failed")
 
+    def authenticate_header(self, request):
+        return 'Bearer'
+
 
 class APIKeyAuthentication(BaseAuthentication):
     """
@@ -53,3 +56,6 @@ class APIKeyAuthentication(BaseAuthentication):
         APIKey.objects.filter(pk=key_obj.pk).update(last_used_at=timezone.now())
 
         return (key_obj.user, key_obj)
+
+    def authenticate_header(self, request):
+        return 'Api-Key'

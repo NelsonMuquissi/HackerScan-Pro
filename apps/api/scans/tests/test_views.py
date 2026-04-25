@@ -6,10 +6,6 @@ import uuid
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture
-def workspace(db, user):
-    from users.models import Workspace
-    return Workspace.objects.create(owner=user, name="WS")
 
 
 @pytest.fixture
@@ -37,12 +33,12 @@ class TestScanTargetListCreate:
         r = api_client.get(self.URL)
         assert r.status_code == 401
 
-    def test_list_empty(self, auth_client):
+    def test_list_empty(self, auth_client, workspace):
         r = auth_client.get(self.URL)
         assert r.status_code == 200
         assert r.data == []
 
-    def test_create_target(self, auth_client):
+    def test_create_target(self, auth_client, workspace):
         r = auth_client.post(self.URL, {"name": "Test", "host": "test.com"}, format="json")
         assert r.status_code == 201
         assert r.data["host"] == "test.com"
@@ -68,7 +64,7 @@ class TestScanTargetDetail:
         r = auth_client.delete(self.url(target.id))
         assert r.status_code == 204
 
-    def test_not_found(self, auth_client):
+    def test_not_found(self, auth_client, workspace):
         r = auth_client.get(self.url(uuid.uuid4()))
         assert r.status_code == 404
 

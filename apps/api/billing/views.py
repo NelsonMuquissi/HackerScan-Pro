@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from users.models import Workspace
 
+import stripe
 from .models import Invoice, Plan, Subscription, UsageRecord
 from .serializers import (
     CreateCheckoutSerializer,
@@ -60,7 +61,7 @@ class SubscriptionView(WorkspaceScopedViewMixin, APIView):
     PATCH  → change plan (new checkout)
     DELETE → cancel at period end
     """
-    permission_classes = [IsWorkspaceAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsWorkspaceAdmin]
 
     def get(self, request):
         wid = self.get_workspace_id(request)
@@ -135,7 +136,6 @@ class SubscriptionView(WorkspaceScopedViewMixin, APIView):
             )
 
         if subscription.stripe_subscription_id:
-            import stripe  # noqa: PLC0415
             stripe.Subscription.modify(
                 subscription.stripe_subscription_id,
                 cancel_at_period_end=True,
@@ -153,7 +153,7 @@ class SubscriptionView(WorkspaceScopedViewMixin, APIView):
 class InvoiceListView(WorkspaceScopedViewMixin, generics.ListAPIView):
     """GET /v1/billing/invoices/ — paginated list of workspace invoices."""
     serializer_class = InvoiceSerializer
-    permission_classes = [IsWorkspaceAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsWorkspaceAdmin]
 
     def get_queryset(self):
         wid = self.get_workspace_id(self.request)
@@ -165,7 +165,7 @@ class InvoiceListView(WorkspaceScopedViewMixin, generics.ListAPIView):
 
 class UsageView(WorkspaceScopedViewMixin, APIView):
     """GET /v1/billing/usage/ — current billing period usage."""
-    permission_classes = [IsWorkspaceAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsWorkspaceAdmin]
 
     def get(self, request):
         wid = self.get_workspace_id(request)
@@ -180,7 +180,7 @@ class UsageView(WorkspaceScopedViewMixin, APIView):
 
 class PortalView(WorkspaceScopedViewMixin, APIView):
     """POST /v1/billing/portal/ — returns Stripe billing portal URL."""
-    permission_classes = [IsWorkspaceAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsWorkspaceAdmin]
 
     def post(self, request):
         serializer = CreatePortalSerializer(data=request.data)
