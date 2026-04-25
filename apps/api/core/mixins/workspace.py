@@ -11,6 +11,11 @@ class WorkspaceScopedViewMixin:
             or request.query_params.get("workspace_id")
             or request.data.get("workspace_id")
         )
+        
+        # 4. If using API key, prefer the key's workspace if no explicit wid was provided
+        if not wid and hasattr(request, "api_key") and request.api_key.workspace_id:
+            return str(request.api_key.workspace_id)
+
         if wid and wid != "undefined":
             return str(wid)
             

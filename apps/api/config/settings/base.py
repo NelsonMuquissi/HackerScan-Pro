@@ -17,6 +17,16 @@ env = environ.Env()
 # Base directory: apps/api/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+# Load .env file
+# Try root .env first, then local .env
+ROOT_DIR = BASE_DIR.parent.parent
+if (ROOT_DIR / ".env").exists():
+    env.read_env(ROOT_DIR / ".env")
+elif (BASE_DIR / ".env").exists():
+    env.read_env(BASE_DIR / ".env")
+elif (BASE_DIR / ".env.development").exists():
+    env.read_env(BASE_DIR / ".env.development")
+
 # Security
 SECRET_KEY = env("SECRET_KEY", default="unsafe-secret-key")
 DEBUG = env.bool("DEBUG", default=False)

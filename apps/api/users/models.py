@@ -275,6 +275,9 @@ class AuditLog(UUIDModel):
     user = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs"
     )
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs"
+    )
     action = models.CharField(max_length=100, db_index=True)  # "user.login", "scan.created"
     resource_type = models.CharField(max_length=100, blank=True, default="")
     resource_id = models.UUIDField(null=True, blank=True)
@@ -286,19 +289,21 @@ class AuditLog(UUIDModel):
     class Meta:
         db_table = "audit_logs"
         indexes = [
+            models.Index(fields=["workspace", "-created_at"], name="idx_audit_ws_created"),
             models.Index(fields=["user", "-created_at"], name="idx_audit_user_created"),
             models.Index(fields=["resource_type", "resource_id"], name="idx_audit_resource"),
         ]
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"{self.action} by {self.user_id} at {self.created_at}"
+        return f"{self.action} by {self.user_id} in {self.workspace_id} at {self.created_at}"
 
     @classmethod
     def log(
         cls,
         action: str,
         user=None,
+        workspace=None,
         resource_type: str = "",
         resource_id=None,
         ip_address: str | None = None,
@@ -308,6 +313,7 @@ class AuditLog(UUIDModel):
         return cls.objects.create(
             action=action,
             user=user,
+            workspace=workspace,
             resource_type=resource_type,
             resource_id=resource_id,
             ip_address=ip_address,

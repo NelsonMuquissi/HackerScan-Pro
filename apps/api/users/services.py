@@ -200,9 +200,17 @@ class AuthService:
         user.last_login_ip = ip_address or None
         user.save(update_fields=["last_login_at", "last_login_ip"])
 
+        # Include primary workspace in the log if available
+        workspace = user.owned_workspaces.filter(is_active=True).first()
+        if not workspace:
+            membership = user.memberships.select_related("workspace").filter(workspace__is_active=True).first()
+            if membership:
+                workspace = membership.workspace
+
         AuditLog.log(
             action="user.login",
             user=user,
+            workspace=workspace,
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -298,8 +306,27 @@ class APIKeyService:
 
     @staticmethod
     def create(user: User, name: str, scopes: list[str], expires_at=None) -> tuple[APIKey, str]:
-        instance, raw_key = APIKey.generate(user=user, name=name, scopes=scopes, expires_at=expires_at)
-        AuditLog.log(action="api_key.created", user=user, resource_type="APIKey", resource_id=instance.id)
+        # Resolve workspace
+        workspace = user.owned_workspaces.filter(is_active=True).first()
+        if not workspace:
+            membership = user.memberships.select_related("workspace").filter(workspace__is_active=True).first()
+            if membership:
+                workspace = membership.workspace
+
+        instance, raw_key = APIKey.generate(
+            user=user, 
+            workspace=workspace,
+            name=name, 
+            scopes=scopes, 
+            expires_at=expires_at
+        )
+        AuditLog.log(
+            action="api_key.created", 
+            user=user, 
+            workspace=workspace,
+            resource_type="APIKey", 
+            resource_id=instance.id
+        )
         return instance, raw_key
 
     @staticmethod
@@ -310,7 +337,13 @@ class APIKeyService:
             raise NotFoundError("API key not found.")
         key.is_active = False
         key.save(update_fields=["is_active"])
-        AuditLog.log(action="api_key.revoked", user=user, resource_type="APIKey", resource_id=key.id)
+        AuditLog.log(
+            action="api_key.revoked", 
+            user=user, 
+            workspace=key.workspace,
+            resource_type="APIKey", 
+            resource_id=key.id
+        )
 
     @staticmethod
     def list_for_user(user: User):
@@ -357,6 +390,7 @@ class WorkspaceService:
         AuditLog.log(
             action="workspace.user_invited",
             user=invited_by,
+            workspace=workspace,
             resource_type="Workspace",
             resource_id=workspace.id,
             metadata={"invite_id": str(invite.id), "email": email}
@@ -388,6 +422,7 @@ class WorkspaceService:
         AuditLog.log(
             action="workspace.invite_accepted",
             user=user,
+            workspace=invite.workspace,
             resource_type="Workspace",
             resource_id=invite.workspace.id
         )
@@ -395,12 +430,11 @@ class WorkspaceService:
 
     @staticmethod
     def get_audit_logs(workspace_id: str, limit: int = 100):
-        # This assumes we want logs related to resources in this workspace.
-        # For simplicity, we filter by metadata or user membership if needed, 
-        # but the AuditLog model should ideally have a workspace_id.
-        # Since it doesn't, we'll filter by users who are members of the workspace.
-        member_ids = WorkspaceMember.objects.filter(workspace_id=workspace_id).values_list("user_id", flat=True)
-        return AuditLog.objects.filter(user_id__in=member_ids).order_by("-created_at")[:limit]
+        """
+        Retrieves logs directly linked to the workspace.
+        This is significantly faster than filtering by member IDs.
+        """
+        return AuditLog.objects.filter(workspace_id=workspace_id).order_by("-created_at")[:limit]
 
     @staticmethod
     def check_permission(user: User, workspace_id: str, required_role: str = "member") -> bool:

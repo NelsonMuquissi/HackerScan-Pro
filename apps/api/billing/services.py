@@ -443,6 +443,11 @@ class BillingService:
         If the workspace has no active subscription, free-plan limits apply
         rather than blocking the user entirely.
         """
+        # Superadmin bypass
+        from users.models import UserRole  # noqa: PLC0415
+        if workspace.owner.role == UserRole.SUPERADMIN:
+            return True, ""
+
         from scans.models import ScanTarget  # noqa: PLC0415 — lazy to avoid circular
 
         try:
@@ -450,14 +455,7 @@ class BillingService:
             plan = subscription.plan
             limits = plan.limits
         except Subscription.DoesNotExist:
-            # No paid subscription → apply free-plan limits if one exists,
-            # otherwise grant access with a sensible default cap.
-            free_plan = Plan.objects.filter(name="free", is_active=True).first()
-            if free_plan:
-                limits = free_plan.limits
-            else:
-                # Fallback: a sane default so the product doesn't hard-block everyone
-                limits = {"scans_per_month": 5, "targets": 3, "api_calls_per_month": 100}
+            return False, "No active subscription found for this workspace. Please subscribe to a plan."
 
         if action == "create_scan":
             limit = limits.get("scans_per_month")

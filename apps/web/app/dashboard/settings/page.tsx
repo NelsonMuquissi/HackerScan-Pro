@@ -68,6 +68,11 @@ export default function SettingsPage() {
         ]);
         setProfile(me);
         
+        // Synchronize store workspaceId
+        if (me?.workspace_id) {
+          useAuthStore.getState().setWorkspaceId(me.workspace_id);
+        }
+        
         // Handle Api Keys
         const keysList = Array.isArray(keysData) ? keysData : (keysData as any)?.results ?? [];
         setApiKeys(keysList);

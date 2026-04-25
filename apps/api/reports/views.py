@@ -8,6 +8,7 @@ from scans.models import Scan
 from scans.views import WorkspaceScopedViewMixin
 from core.permissions import IsWorkspaceMember
 from .serializers import ReportSerializer
+from users.models import AuditLog
 
 class ReportCreateView(WorkspaceScopedViewMixin, views.APIView):
     """
@@ -32,6 +33,19 @@ class ReportCreateView(WorkspaceScopedViewMixin, views.APIView):
 
         # Trigger Celery task
         generate_scan_report.delay(report.id)
+
+        AuditLog.log(
+            user=request.user,
+            action="report.create",
+            workspace_id=wid,
+            resource_type="Report",
+            resource_id=report.id,
+            metadata={
+                "scan_id": str(scan.id),
+                "type": report_type,
+                "format": report_format
+            }
+        )
 
         return Response(
             {

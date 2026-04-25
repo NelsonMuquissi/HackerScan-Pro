@@ -18,7 +18,7 @@ def api_client():
 def user(db):
     """A verified, active standard user."""
     return User.objects.create_user(
-        email="user@hackscan.test",
+        email="user@hackscan.com",
         password="SecurePass123!",
         full_name="Test User",
         email_verified=True,
@@ -30,7 +30,7 @@ def user(db):
 def unverified_user(db):
     """A registered but unverified user."""
     return User.objects.create_user(
-        email="unverified@hackscan.test",
+        email="unverified@hackscan.com",
         password="SecurePass123!",
         full_name="Unverified User",
         email_verified=False,
@@ -41,7 +41,7 @@ def unverified_user(db):
 def admin_user(db):
     """A platform admin user."""
     return User.objects.create_user(
-        email="admin@hackscan.test",
+        email="admin@hackscan.com",
         password="AdminPass123!",
         full_name="Admin User",
         email_verified=True,
@@ -64,15 +64,21 @@ def auth_client(api_client, user):
 
 @pytest.fixture
 def workspace(db, user):
-    """A workspace owned by the standard user."""
-    from users.models import Workspace  # noqa: PLC0415
+    """A workspace owned by the standard user, with membership record."""
+    from users.models import Workspace, WorkspaceMember  # noqa: PLC0415
 
-    return Workspace.objects.create(
+    ws = Workspace.objects.create(
         owner=user,
         name="Test Workspace",
         slug="test-workspace",
         plan="free",
     )
+    WorkspaceMember.objects.create(
+        workspace=ws,
+        user=user,
+        role="owner",
+    )
+    return ws
 
 
 @pytest.fixture

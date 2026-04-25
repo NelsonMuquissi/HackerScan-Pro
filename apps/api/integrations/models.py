@@ -3,6 +3,9 @@ import secrets
 from django.db import models
 from core.models import TimestampedModel
 
+def generate_webhook_secret():
+    return f"whsec_{secrets.token_hex(20)}"
+
 class Webhook(TimestampedModel):
     """
     Outbound webhook configuration for a workspace.
@@ -17,7 +20,7 @@ class Webhook(TimestampedModel):
     url = models.URLField(max_length=500)
     secret_token = models.CharField(
         max_length=128, 
-        default=lambda: f"whsec_{secrets.token_hex(20)}"
+        default=generate_webhook_secret
     )
     
     # List of events this webhook is subscribed to (e.g., ["scan.completed", "finding.new"])

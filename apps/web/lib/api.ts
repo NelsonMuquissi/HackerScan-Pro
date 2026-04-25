@@ -200,8 +200,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return fetchApi<DashboardStats>('/scans/dashboard/');
 }
 
-export async function listScans(): Promise<any[] | PaginatedResponse<any>> {
-  return fetchApi<any[] | PaginatedResponse<any>>('/scans/');
+export async function listScans(workspaceId?: string): Promise<any[] | PaginatedResponse<any>> {
+  const url = workspaceId && workspaceId !== 'undefined' ? `/scans/?workspace_id=${workspaceId}` : '/scans/';
+  return fetchApi<any[] | PaginatedResponse<any>>(url);
 }
 
 // Billing API
@@ -465,6 +466,7 @@ export async function inviteToWorkspace(workspaceId: string, email: string, role
 }
 
 export async function listAuditLogs(workspaceId: string): Promise<any[]> {
+  if (!workspaceId || workspaceId === 'undefined') return [];
   const data = await fetchApi<any[] | PaginatedResponse<any>>(`/workspaces/${workspaceId}/audit-logs/`);
   return Array.isArray(data) ? data : (data as any)?.results ?? [];
 }
