@@ -256,7 +256,13 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
                       <span className="text-[10px] font-mono text-gray-500 bg-[#111] px-1.5 py-0.5 rounded border border-card-border uppercase">
                         {f.plugin_slug}
                       </span>
-                      {f.status === 'active' && (
+                      {f.is_false_positive && (
+                        <span className="text-[10px] font-bold text-neon-red bg-red-900/20 px-1.5 py-0.5 rounded border border-neon-red/30 flex items-center gap-1">
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          FALSE POSITIVE (AI)
+                        </span>
+                      )}
+                      {f.status === 'active' && !f.is_false_positive && (
                         f.first_seen_at === f.last_seen_at ? (
                           <span className="text-[10px] font-bold text-neon-green bg-neon-green-dim px-1.5 py-0.5 rounded border border-neon-green/30">
                             NEW
@@ -280,14 +286,26 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
                     <span>SEEN: {new Date(f.first_seen_at).toLocaleDateString()}</span>
                     <span>LAST: {new Date(f.last_seen_at).toLocaleDateString()}</span>
                   </div>
-                  <span className={cn(
-                    "font-bold",
-                    f.severity === 'CRITICAL' ? "text-neon-red" :
-                    f.severity === 'HIGH' ? "text-neon-yellow" :
-                    "text-gray-400"
-                  )}>
-                    {f.severity}
-                  </span>
+                  <div className="flex flex-col items-end mr-4">
+                    <span className={cn(
+                      "font-bold",
+                      f.severity === 'CRITICAL' ? "text-neon-red" :
+                      f.severity === 'HIGH' ? "text-neon-yellow" :
+                      "text-gray-400"
+                    )}>
+                      {f.severity}
+                    </span>
+                    {f.cvss_score && (
+                      <span className="text-[10px] font-mono text-gray-500">
+                        CVSS: {f.cvss_score}
+                      </span>
+                    )}
+                    {f.epss_score && (
+                      <span className="text-[10px] font-mono text-gray-500">
+                        EPSS: {(f.epss_score * 100).toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
                   {expandedFindings[f.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </div>
               </div>
@@ -329,8 +347,26 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
                       <div className="space-y-4">
                         {(f.ai_explanation || f.ai_remediation) ? (
                           <div className="bg-neon-green-dim border border-neon-green/30 p-4 rounded-lg space-y-4 shadow-[0_0_15px_rgba(57,255,20,0.05)]">
-                            {f.ai_explanation && (
+                            {f.ai_reasoning && (
                               <div className="space-y-2">
+                                <h4 className={cn(
+                                  "text-[10px] font-bold uppercase tracking-tighter flex items-center gap-2",
+                                  f.is_false_positive ? "text-neon-red" : "text-neon-green"
+                                )}>
+                                  <Shield className={cn("w-3 h-3", f.is_false_positive ? "fill-neon-red" : "fill-neon-green")} />
+                                  AI VERIFICATION LOG: {f.is_false_positive ? "FALSE POSITIVE DETECTED" : "VALIDATED FINDING"}
+                                </h4>
+                                <p className={cn(
+                                  "text-sm leading-snug font-mono italic",
+                                  f.is_false_positive ? "text-neon-red/90" : "text-neon-green/90"
+                                )}>
+                                  "{f.ai_reasoning}"
+                                </p>
+                              </div>
+                            )}
+
+                            {f.ai_explanation && (
+                              <div className={cn("space-y-2", f.ai_reasoning && "pt-2 border-t border-neon-green/20")}>
                                 <h4 className="text-[10px] font-bold text-neon-green uppercase tracking-tighter flex items-center gap-2">
                                   <Zap className="w-3 h-3 fill-neon-green" />
                                   AI-POWERED THREAT ANALYSIS
@@ -354,24 +390,54 @@ export function ScanDetailContent({ scanId }: ScanDetailContentProps) {
                             )}
                           </div>
                         ) : (
-                          <div className="flex flex-wrap gap-3">
-                            <button 
-                              onClick={() => handleAIAction(f.id, 'explain')}
-                              disabled={!!aiLoading[f.id]}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-neon-green/10 border border-neon-green/30 text-neon-green rounded text-[10px] font-bold uppercase tracking-widest hover:bg-neon-green/20 transition-all disabled:opacity-50"
-                            >
-                              {aiLoading[f.id] === 'explain' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                              EXPLIQUE ESTE RISCO COM IA
-                            </button>
-                            <button 
-                              onClick={() => handleAIAction(f.id, 'remediate')}
-                              disabled={!!aiLoading[f.id]}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded text-[10px] font-bold uppercase tracking-widest hover:bg-blue-500/20 transition-all disabled:opacity-50"
-                            >
-                              {aiLoading[f.id] === 'remediate' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Shield className="w-3 h-3" />}
-                              GERAR REMEDIAÇÃO PERSONALIZADA
-                            </button>
-                          </div>
+                          f.ai_reasoning ? (
+                            <div className="bg-card-bg border border-card-border p-4 rounded-lg space-y-3">
+                               <div className="space-y-2">
+                                <h4 className={cn(
+                                  "text-[10px] font-bold uppercase tracking-tighter flex items-center gap-2",
+                                  f.is_false_positive ? "text-neon-red" : "text-gray-400"
+                                )}>
+                                  <Shield className={cn("w-3 h-3", f.is_false_positive ? "fill-neon-red" : "fill-gray-500")} />
+                                  AI VERIFICATION: {f.is_false_positive ? "FALSE POSITIVE" : "POTENTIAL FINDING"}
+                                </h4>
+                                <p className={cn(
+                                  "text-sm leading-snug italic",
+                                  f.is_false_positive ? "text-neon-red/80" : "text-gray-400"
+                                )}>
+                                  {f.ai_reasoning}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-3 mt-2">
+                                <button 
+                                  onClick={() => handleAIAction(f.id, 'explain')}
+                                  disabled={!!aiLoading[f.id]}
+                                  className="flex items-center gap-2 px-3 py-1.5 bg-neon-green/10 border border-neon-green/30 text-neon-green rounded text-[10px] font-bold uppercase tracking-widest hover:bg-neon-green/20 transition-all disabled:opacity-50"
+                                >
+                                  {aiLoading[f.id] === 'explain' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                                  AI DEEP DIVE
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap gap-3">
+                              <button 
+                                onClick={() => handleAIAction(f.id, 'explain')}
+                                disabled={!!aiLoading[f.id]}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-neon-green/10 border border-neon-green/30 text-neon-green rounded text-[10px] font-bold uppercase tracking-widest hover:bg-neon-green/20 transition-all disabled:opacity-50"
+                              >
+                                {aiLoading[f.id] === 'explain' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                                EXPLIQUE ESTE RISCO COM IA
+                              </button>
+                              <button 
+                                onClick={() => handleAIAction(f.id, 'remediate')}
+                                disabled={!!aiLoading[f.id]}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded text-[10px] font-bold uppercase tracking-widest hover:bg-blue-500/20 transition-all disabled:opacity-50"
+                              >
+                                {aiLoading[f.id] === 'remediate' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Shield className="w-3 h-3" />}
+                                GERAR REMEDIAÇÃO PERSONALIZADA
+                              </button>
+                            </div>
+                          )
                         )}
                       </div>
                     </div>

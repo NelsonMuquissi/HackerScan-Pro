@@ -39,8 +39,8 @@ class FindingSerializer(serializers.ModelSerializer):
         model  = Finding
         fields = [
             "id", "plugin_slug", "severity", "status", "title", "description",
-            "remediation", "evidence", "cvss_score",
-            "fingerprint", "is_false_positive", "first_seen_at", "last_seen_at",
+            "remediation", "evidence", "cvss_score", "epss_score",
+            "fingerprint", "is_false_positive", "ai_reasoning", "first_seen_at", "last_seen_at",
             "resolved_at", "created_at", "ai_explanation", "ai_remediation",
         ]
         read_only_fields = fields
