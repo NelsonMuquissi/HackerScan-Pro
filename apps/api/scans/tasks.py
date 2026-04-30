@@ -299,7 +299,11 @@ def run_scan(self, scan_id: str) -> dict:
                     # Update AI insights if they were calculated in this scan
                     f.is_false_positive = fd.is_false_positive
                     f.ai_reasoning = fd.ai_reasoning
-                    f.save(update_fields=["last_seen_at", "scan", "is_false_positive", "ai_reasoning"])
+                    # Update proof data if it changed
+                    f.request = fd.request
+                    f.response = fd.response
+                    f.poc = fd.poc
+                    f.save(update_fields=["last_seen_at", "scan", "is_false_positive", "ai_reasoning", "request", "response", "poc"])
                 else:
                     # New finding
                     f_new = Finding(
@@ -315,6 +319,10 @@ def run_scan(self, scan_id: str) -> dict:
                         epss_score=fd.epss_score,
                         is_false_positive=fd.is_false_positive,
                         ai_reasoning=fd.ai_reasoning,
+                        request=fd.request,
+                        response=fd.response,
+                        poc=fd.poc,
+                        is_verified=fd.is_verified,
                         first_seen_at=timezone.now(),
                         last_seen_at=timezone.now(),
                         status=FindingStatus.ACTIVE
@@ -423,4 +431,51 @@ def run_scheduled_scan(scheduled_scan_id: str) -> dict:
     except Exception as exc:
         logger.exception("run_scheduled_scan: failed to trigger scan for schedule %s", ss.id)
         return {"error": str(exc)}
+
+
+@shared_task(name="scans.verify_finding_task")
+def verify_finding_task(finding_id: str) -> bool:
+    """
+    Re-runs the specific probe that found the vulnerability to verify it still exists.
+    """
+    from scans.models import Finding, FindingStatus  # noqa: PLC0415
+    from scans.strategies.base import get_strategy   # noqa: PLC0415
+    
+    try:
+        finding = Finding.objects.select_related("scan__target").get(pk=finding_id)
+    except Finding.DoesNotExist:
+        logger.error("verify_finding_task: Finding %s not found", finding_id)
+        return False
+
+    strategy = get_strategy(finding.plugin_slug)
+    if not strategy:
+        logger.warning("verify_finding_task: No strategy found for slug %s", finding.plugin_slug)
+        return False
+
+    logger.info("Starting verification for finding: %s (Plugin: %s)", finding.title, finding.plugin_slug)
+    
+    try:
+        # 🎯 Call the strategy-specific verification logic
+        is_verified = strategy.verify(finding)
+        
+        finding.is_verified = is_verified
+        if is_verified:
+            # If it's verified, ensure it's ACTIVE (not resolved/ignored)
+            if finding.status in [FindingStatus.RESOLVED, FindingStatus.IGNORED]:
+                finding.status = FindingStatus.ACTIVE
+            finding.is_false_positive = False
+        else:
+            # If we can't verify it anymore, it might be patched or a FP
+            # We don't automatically mark as FP unless the strategy is certain
+            # But we update the verified status
+            pass
+            
+        finding.save(update_fields=["is_verified", "status", "is_false_positive", "request", "response"])
+        logger.info("Verification finished for %s: is_verified=%s", finding.title, is_verified)
+        return is_verified
+
+    except Exception as e:
+        logger.error("Error during verification of %s: %s", finding_id, e)
+        return False
+
 

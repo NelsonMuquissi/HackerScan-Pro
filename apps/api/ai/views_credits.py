@@ -34,8 +34,20 @@ class AIWalletView(WorkspaceScopedViewMixin, views.APIView):
     def get(self, request):
         wid = self.get_workspace_id(request)
         wallet, _ = AIWallet.objects.get_or_create(workspace_id=wid)
-        serializer = AIWalletSerializer(wallet)
-        return Response(serializer.data)
+        
+        # Admin bypass: return a huge balance for admins
+        from users.models import UserRole
+        is_admin = request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]
+        
+        serializer = AIWalletSerializer(wallet, context={'request': request})
+        data = serializer.data
+        
+        if is_admin:
+            data['balance_total'] = 999999
+            data['balance_subscription'] = 999999
+            data['is_low_balance'] = False
+            
+        return Response(data)
 
     def patch(self, request):
         self.permission_classes = [IsWorkspaceAdmin]

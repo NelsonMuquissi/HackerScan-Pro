@@ -100,11 +100,17 @@ class CreditService:
         workspace,
         action: str,
         express: bool = False,
+        user=None,
     ) -> tuple[bool, int, int]:
         """
         Check whether workspace can afford an action.
         Returns: (has_balance, cost, current_balance)
+        Admins and SuperAdmins always have balance.
         """
+        from users.models import UserRole # noqa: PLC0415
+        if user and user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+             return True, 0, 999999
+
         cost = cls.get_cost(action, express)
         if cost == 0:
             return True, 0, 0
@@ -137,8 +143,15 @@ class CreditService:
         Atomically debit credits from wallet.
         Consumption order: subscription → purchased → bonus.
         Uses SELECT FOR UPDATE for thread safety.
+        Admins and SuperAdmins skip the debit.
         """
-        cost = 0 if was_cached else cls.get_cost(action, express)
+        from users.models import UserRole # noqa: PLC0415
+        if user and user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+             # Create a record of the use but with 0 cost
+             was_cached = True # effective bypass
+             cost = 0
+        else:
+             cost = 0 if was_cached else cls.get_cost(action, express)
 
         wallet, _created = AIWallet.objects.select_for_update().get_or_create(
             workspace=workspace,

@@ -206,6 +206,10 @@ class AuthService:
             membership = user.memberships.select_related("workspace").filter(workspace__is_active=True).first()
             if membership:
                 workspace = membership.workspace
+        
+        # Global Admin fallback for logs
+        if not workspace and user.role in ["admin", "superadmin"]:
+            workspace = Workspace.objects.filter(is_active=True).first()
 
         AuditLog.log(
             action="user.login",
@@ -312,6 +316,10 @@ class APIKeyService:
             membership = user.memberships.select_related("workspace").filter(workspace__is_active=True).first()
             if membership:
                 workspace = membership.workspace
+        
+        # Global Admin fallback
+        if not workspace and user.role in ["admin", "superadmin"]:
+            workspace = Workspace.objects.filter(is_active=True).first()
 
         instance, raw_key = APIKey.generate(
             user=user, 
@@ -441,6 +449,10 @@ class WorkspaceService:
         """
         Utility for Django Views (non-DRF) to verify workspace access.
         """
+        # Global Admin/Superadmin bypass
+        if user.role in ["admin", "superadmin"]:
+            return True
+
         from core.permissions import ROLE_HIERARCHY # noqa: PLC0415
         allowed_roles = ROLE_HIERARCHY.get(required_role, [])
         return WorkspaceMember.objects.filter(

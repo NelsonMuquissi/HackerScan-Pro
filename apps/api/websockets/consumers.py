@@ -33,7 +33,9 @@ class NotificationConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_user_workspaces(self):
-        from users.models import WorkspaceMember
+        from users.models import WorkspaceMember, Workspace, UserRole
+        if self.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+            return list(Workspace.objects.filter(is_active=True).values_list("id", flat=True))
         return list(WorkspaceMember.objects.filter(user=self.user).values_list("workspace_id", flat=True))
 
     async def disconnect(self, close_code):
@@ -98,10 +100,22 @@ class ScanConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def has_scan_access(self):
         from scans.models import Scan
+        from users.models import WorkspaceMember, UserRole
         try:
-            # Check if scan exists and belongs to a workspace where user is a member
-            # Simplified check: scan.target.owner == user
-            return Scan.objects.filter(pk=self.scan_id, target__owner=self.user).exists()
+            # Admins and Superadmins have access to everything
+            if self.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+                return True
+                
+            # Check if scan exists
+            scan = Scan.objects.get(pk=self.scan_id)
+            workspace = scan.target.workspace
+            
+            # Check if user is the owner of the target
+            if scan.target.owner == self.user:
+                return True
+                
+            # Check if user is a member of the workspace
+            return WorkspaceMember.objects.filter(workspace=workspace, user=self.user).exists()
         except Exception:
             return False
 

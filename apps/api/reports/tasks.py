@@ -22,6 +22,8 @@ def generate_scan_report(report_id):
         report.save()
 
         scan = report.scan
+        workspace = scan.target.workspace
+        user = scan.triggered_by
         # Prepare findings data
         findings_data = []
         for finding in scan.findings.all():
@@ -35,7 +37,10 @@ def generate_scan_report(report_id):
                         ai_explanation = ai_service.explain_finding(
                             finding.title,
                             finding.description,
-                            finding.severity
+                            finding.severity,
+                            evidence=finding.evidence,
+                            workspace=workspace,
+                            user=user
                         )
                         finding.ai_explanation = ai_explanation
                         finding.save(update_fields=['ai_explanation'])
@@ -46,7 +51,10 @@ def generate_scan_report(report_id):
                     try:
                         ai_remediation = ai_service.generate_remediation_code(
                             finding.title,
-                            finding.description
+                            finding.description,
+                            evidence=finding.evidence,
+                            workspace=workspace,
+                            user=user
                         )
                         finding.ai_remediation = ai_remediation
                         finding.save(update_fields=['ai_remediation'])
@@ -77,15 +85,19 @@ def generate_scan_report(report_id):
         ai_prediction = ""
         try:
             # We use findings_data which is already redacted/prepared
-            ai_prediction = ai_service.predict_attack_chains(findings_data)
+            ai_prediction = ai_service.predict_attack_chains(
+                findings_data,
+                workspace=workspace,
+                user=user
+            )
         except Exception as ai_e:
             logger.warning("Failed to generate AI attack chain for report %s: %s", report_id, ai_e)
 
         # Aggregate severity counts from findings
-        critical_count = sum(1 for f in findings_data if f['severity'] == 'CRITICAL')
-        high_count = sum(1 for f in findings_data if f['severity'] == 'HIGH')
-        medium_count = sum(1 for f in findings_data if f['severity'] == 'MEDIUM')
-        low_count = sum(1 for f in findings_data if f['severity'] == 'LOW')
+        critical_count = sum(1 for f in findings_data if f['severity'].upper() == 'CRITICAL')
+        high_count = sum(1 for f in findings_data if f['severity'].upper() == 'HIGH')
+        medium_count = sum(1 for f in findings_data if f['severity'].upper() == 'MEDIUM')
+        low_count = sum(1 for f in findings_data if f['severity'].upper() == 'LOW')
 
         scan_data = {
             'id': str(scan.id),

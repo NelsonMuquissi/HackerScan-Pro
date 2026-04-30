@@ -18,9 +18,13 @@ class ReportCreateView(WorkspaceScopedViewMixin, views.APIView):
     permission_classes = [IsWorkspaceMember]
 
     def post(self, request, scan_id):
-        wid = self.get_workspace_id(request)
-        # Ensure scan belongs to this workspace
-        scan = get_object_or_404(Scan, id=scan_id, target__workspace_id=wid)
+        from users.models import UserRole  # noqa: PLC0415
+        is_global_admin = request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]
+        
+        if is_global_admin:
+            scan = get_object_or_404(Scan, id=scan_id)
+        else:
+            scan = get_object_or_404(Scan, id=scan_id, target__workspace_id=wid)
         
         report_type = request.data.get('type', Report.Type.TECHNICAL)
         report_format = request.data.get('format', Report.Format.PDF)
@@ -37,7 +41,7 @@ class ReportCreateView(WorkspaceScopedViewMixin, views.APIView):
         AuditLog.log(
             user=request.user,
             action="report.create",
-            workspace_id=wid,
+            workspace=scan.target.workspace,
             resource_type="Report",
             resource_id=report.id,
             metadata={
@@ -72,6 +76,10 @@ class ReportViewSet(WorkspaceScopedViewMixin,
     permission_classes = [IsWorkspaceMember]
 
     def get_queryset(self):
+        from users.models import UserRole  # noqa: PLC0415
+        if self.request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+            return Report.objects.all().select_related("scan", "scan__target")
+            
         wid = self.get_workspace_id(self.request)
         return Report.objects.filter(scan__target__workspace_id=wid).select_related("scan", "scan__target")
 

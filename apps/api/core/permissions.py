@@ -29,6 +29,10 @@ class WorkspacePermission(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
+        # Global Admin/Superadmin bypass
+        if request.user.role in ["admin", "superadmin"]:
+            return True
+
         # Attempt to find workspace_id in common locations
         workspace_id = (
             view.kwargs.get("workspace_id")

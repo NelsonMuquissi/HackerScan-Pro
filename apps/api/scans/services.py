@@ -116,8 +116,8 @@ class ScanService:
             user=user,
             action="scan.create",
             workspace=target.workspace,
-            target_id=scan.id,
-            target_type="scan",
+            resource_id=scan.id,
+            resource_type="scan",
             metadata={
                 "target_host": target.host,
                 "scan_type": scan_type,
@@ -149,8 +149,8 @@ class ScanService:
             user=scan.triggered_by,
             action="scan.trigger",
             workspace=scan.target.workspace,
-            target_id=scan.id,
-            target_type="scan",
+            resource_id=scan.id,
+            resource_type="scan",
             metadata={"target_host": scan.target.host}
         )
 
@@ -179,8 +179,8 @@ class ScanService:
             user=None, # System action or user context if available
             action="scan.cancel",
             workspace=scan.target.workspace,
-            target_id=scan.id,
-            target_type="scan",
+            resource_id=scan.id,
+            resource_type="scan",
             metadata={"target_host": scan.target.host}
         )
 
@@ -254,7 +254,7 @@ class ScanService:
             )
 
         # 2. Enforce Quota
-        allowed, reason = BillingService.check_quota(workspace, "create_scan")
+        allowed, reason = BillingService.check_quota(workspace, "create_scan", user=user)
         if not allowed:
             raise ServiceError(reason)
 
@@ -287,12 +287,60 @@ class ScanService:
 
         from users.models import AuditLog
         AuditLog.log(
+            "scan.quick_create",
             user=user,
-            action="scan.quick_create",
             workspace=workspace,
-            target_id=scan.id,
-            target_type="scan",
+            resource_id=scan.id,
+            resource_type="scan",
             metadata={"target_host": host, "scan_type": scan_type}
         )
 
         return scan
+
+# ─── FindingService ───────────────────────────────────────────────────────
+
+from .models import Finding, FindingStatus
+
+class FindingService:
+    @staticmethod
+    def get_or_404(workspace_id: UUID, finding_id: UUID) -> Finding:
+        try:
+            return Finding.objects.select_related("scan__target").get(
+                pk=finding_id, scan__target__workspace_id=workspace_id
+            )
+        except Finding.DoesNotExist:
+            raise NotFoundError("Finding not found.")
+
+    @staticmethod
+    def verify(workspace_id: UUID, finding_id: UUID) -> Finding:
+        """Trigger an automated verification for a finding."""
+        finding = FindingService.get_or_404(workspace_id, finding_id)
+        
+        from .tasks import verify_finding_task  # noqa: PLC0415
+        verify_finding_task.delay(str(finding.id))
+        
+        logger.info("FindingService.verify: queued verification for finding %s", finding.id)
+        return finding
+
+    @staticmethod
+    def generate_poc(workspace_id: UUID, finding_id: UUID) -> str:
+        """Use AI to generate a professional POC for the finding."""
+        finding = FindingService.get_or_404(workspace_id, finding_id)
+        
+        if finding.poc and not finding.poc.startswith("AI-GEN"):
+            return finding.poc
+
+        try:
+            from ai.services import ai_service
+            poc = ai_service.generate_vulnerability_poc(
+                title=finding.title,
+                description=finding.description,
+                evidence=finding.evidence,
+                request_data=finding.request
+            )
+            finding.poc = poc
+            finding.save(update_fields=["poc"])
+            return poc
+        except Exception as e:
+            logger.error("Failed to generate POC via AI: %s", e)
+            return "POC generation failed. Please try again later."

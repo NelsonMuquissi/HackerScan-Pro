@@ -8,6 +8,7 @@ import { SeverityHeatmap } from '@/components/dashboard/SeverityHeatmap';
 import { TerminalOutput } from '@/components/TerminalOutput';
 import { Activity, ShieldAlert, Bug, Target, Terminal, Zap, ShieldCheck, Lock, Loader2, ExternalLink } from 'lucide-react';
 import { startScan, getDashboardStats, listPlugins, type DashboardStats } from '@/lib/api';
+import { useAuthStore } from '@/store/useAuthStore';
 import Link from 'next/link';
 
 export default function DashboardPage() {
@@ -22,8 +23,10 @@ export default function DashboardPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsError, setStatsError] = useState(false);
+  const { user, workspaceId } = useAuthStore();
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
 
-   // Initial stats and plugins load
+  // Initial stats and plugins load
   useEffect(() => {
     getDashboardStats()
       .then(setStats)
@@ -58,9 +61,13 @@ export default function DashboardPage() {
 
     try {
       setIsScanning(true);
-      // For custom scans, we send 'full' as scanType if it requires deep inspection, 
-      // or just 'custom'. The backend handles prioritized plugin_ids.
-      const res = await startScan(targetUrl, scanType, undefined, selectedPlugins);
+      
+      let normalizedUrl = targetUrl.trim();
+      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = `https://${normalizedUrl}`;
+      }
+
+      const res = await startScan(normalizedUrl, scanType, workspaceId || undefined, selectedPlugins);
       setActiveScanId(res.scan_id);
       // Refresh dashboard stats after starting a scan
       setTimeout(refreshStats, 2000);
@@ -98,7 +105,7 @@ export default function DashboardPage() {
                 <Target className="w-4 h-4" />
               </div>
               <input
-                type="url"
+                type="text"
                 value={targetUrl}
                 onChange={(e) => setTargetUrl(e.target.value)}
                 placeholder="PROBE TARGET (URL/IP)..."
@@ -113,14 +120,14 @@ export default function DashboardPage() {
                 onChange={(e) => setScanType(e.target.value)}
                 className="bg-[#0a0a0a] border border-white/5 rounded-lg px-4 py-3 font-mono text-[10px] focus:outline-none focus:border-neon-green/50 text-gray-400 uppercase tracking-widest"
               >
-                 <option value="quick">QUICK SCOPE</option>
+                <option value="quick">QUICK SCOPE</option>
                 <option value="full">FULL SPECTRUM</option>
                 <option value="vuln">VULN RESEARCH</option>
                 <option value="recon">RECON & DISCOVERY</option>
                 <option value="custom">CUSTOM PLUGINS</option>
-                <option value="ad_audit">AD TACTICAL [PREMIUM]</option>
-                <option value="k8s_security">K8S HARDENING [PREMIUM]</option>
-                <option value="sap_audit">SAP ECOSYSTEM [PREMIUM]</option>
+                <option value="ad_audit">AD TACTICAL {!isAdmin && '[PREMIUM]'}</option>
+                <option value="k8s_security">K8S HARDENING {!isAdmin && '[PREMIUM]'}</option>
+                <option value="sap_audit">SAP ECOSYSTEM {!isAdmin && '[PREMIUM]'}</option>
               </select>
 
               <button 

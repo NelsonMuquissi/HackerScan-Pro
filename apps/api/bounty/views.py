@@ -28,6 +28,10 @@ class WorkspaceBountyViewSet(WorkspaceScopedViewMixin, viewsets.ModelViewSet):
     permission_classes = [IsWorkspaceAdmin]
 
     def get_queryset(self):
+        from users.models import UserRole  # noqa: PLC0415
+        if self.request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+            return BountyProgram.objects.all()
+            
         wid = self.get_workspace_id(self.request)
         return BountyProgram.objects.filter(workspace_id=wid)
 
@@ -39,7 +43,7 @@ class WorkspaceBountyViewSet(WorkspaceScopedViewMixin, viewsets.ModelViewSet):
         wid = self.get_workspace_id(self.request)
         workspace = Workspace.objects.get(id=wid)
         
-        allowed, reason = BillingService.check_quota(workspace, "create_bounty")
+        allowed, reason = BillingService.check_quota(workspace, "create_bounty", user=self.request.user)
         if not allowed:
             raise PermissionDenied(reason)
             
@@ -53,6 +57,10 @@ class WorkspaceSubmissionViewSet(WorkspaceScopedViewMixin, viewsets.ReadOnlyMode
     permission_classes = [IsWorkspaceAdmin]
 
     def get_queryset(self):
+        from users.models import UserRole  # noqa: PLC0415
+        if self.request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+            return BountySubmission.objects.all()
+            
         wid = self.get_workspace_id(self.request)
         return BountySubmission.objects.filter(program__workspace_id=wid)
 

@@ -27,6 +27,11 @@ class QuotaCheckMixin:
 
     def create(self, request, *args, **kwargs):
         if self.quota_action:
+            # God-mode bypass: Admins and SuperAdmins skip quota checks
+            from users.models import UserRole # noqa: PLC0415
+            if request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+                return super().create(request, *args, **kwargs)
+
             workspace = self.get_workspace()
             
             if workspace is None:
@@ -35,7 +40,7 @@ class QuotaCheckMixin:
                     status=status.HTTP_403_FORBIDDEN,
                 )
                 
-            allowed, reason = BillingService.check_quota(workspace, self.quota_action)
+            allowed, reason = BillingService.check_quota(workspace, self.quota_action, user=request.user)
 
             if not allowed:
                 return Response(

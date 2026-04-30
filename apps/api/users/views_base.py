@@ -61,7 +61,7 @@ class BaseView(View):
 
     def success_response(self, data=None, status=200):
         """Return a successful JSON response."""
-        response_data = data or {}
+        response_data = data if data is not None else {}
         # safe=False allows non-dict objects (like lists from serializers)
         return JsonResponse(response_data, status=status, safe=False)
 

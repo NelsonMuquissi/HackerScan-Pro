@@ -280,21 +280,24 @@ export async function updateNotificationPreference(id: string, data: any): Promi
 }
 
 // AI Analysis API
-export async function explainFindingAI(findingId: string): Promise<{ explanation: string }> {
+export async function explainFindingAI(findingId: string, express: boolean = false): Promise<{ explanation: string }> {
   return fetchApi<{ explanation: string }>(`/ai/findings/${findingId}/explain/`, {
     method: 'POST',
+    body: JSON.stringify({ express }),
   });
 }
 
-export async function remediateFindingAI(findingId: string): Promise<{ remediation: string }> {
+export async function remediateFindingAI(findingId: string, express: boolean = false): Promise<{ remediation: string }> {
   return fetchApi<{ remediation: string }>(`/ai/findings/${findingId}/remediate/`, {
     method: 'POST',
+    body: JSON.stringify({ express }),
   });
 }
 
-export async function getScanAIPrediction(scanId: string): Promise<{ prediction: string }> {
+export async function getScanAIPrediction(scanId: string, express: boolean = false): Promise<{ prediction: string }> {
   return fetchApi<{ prediction: string }>(`/ai/scans/${scanId}/prediction/`, {
     method: 'POST',
+    body: JSON.stringify({ express }),
   });
 }
 
@@ -404,6 +407,10 @@ export async function createModuleCheckout(slug: string, workspaceId: string, da
   });
 }
 
+// AI System API (Unifying with the POST versions above)
+// Redundant functions removed. Use explainFindingAI, remediateFindingAI, and getScanAIPrediction instead.
+
+
 // AI Credit System API
 export async function getAIWallet(workspaceId: string): Promise<any> {
   const url = workspaceId && workspaceId !== 'undefined' ? `/ai/wallet/?workspace_id=${workspaceId}` : '/ai/wallet/';
@@ -431,26 +438,6 @@ export async function listAIAchievements(workspaceId: string): Promise<any[]> {
   return fetchApi<any[]>(url);
 }
 
-export async function getAIExplanation(findingId: string, express: boolean = false): Promise<{ explanation: string }> {
-  return fetchApi<{ explanation: string }>(`/ai/explanation/${findingId}/`, {
-    method: 'POST',
-    body: JSON.stringify({ express }),
-  });
-}
-
-export async function getAIRemediation(findingId: string, express: boolean = false): Promise<{ remediation: string }> {
-  return fetchApi<{ remediation: string }>(`/ai/remediation/${findingId}/`, {
-    method: 'POST',
-    body: JSON.stringify({ express }),
-  });
-}
-
-export async function getAIScanPrediction(scanId: string, express: boolean = false): Promise<{ prediction: string }> {
-  return fetchApi<{ prediction: string }>(`/ai/predict/${scanId}/`, {
-    method: 'POST',
-    body: JSON.stringify({ express }),
-  });
-}
 
 // Workspace & Team API
 export async function listWorkspaceMembers(workspaceId: string): Promise<any[]> {

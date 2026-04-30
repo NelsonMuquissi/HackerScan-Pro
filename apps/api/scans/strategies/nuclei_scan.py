@@ -35,6 +35,7 @@ class NucleiVulnStrategy(BaseScanStrategy):
                 "-target", host,
                 "-json-export", output_file,
                 "-silent",
+                "-include-rr",
                 "-no-update-check"
             ]
             if tags:
@@ -82,7 +83,10 @@ class NucleiVulnStrategy(BaseScanStrategy):
                                 severity=self._map_severity(data.get("info", {}).get("severity", "info")),
                                 evidence=evidence_dict,
                                 remediation=data.get("info", {}).get("remediation", ""),
-                                cvss_score=cvss_score
+                                cvss_score=cvss_score,
+                                request=data.get("request", ""),
+                                response=data.get("response", ""),
+                                poc=f"nuclei -u {host} -id {data.get('template-id')}"
                             ))
                         except json.JSONDecodeError:
                             continue
@@ -101,6 +105,30 @@ class NucleiVulnStrategy(BaseScanStrategy):
                 os.remove(output_file)
 
         return findings
+
+    def verify(self, finding: "Finding") -> bool:
+        """
+        Re-verify by running the specific template that found this vulnerability.
+        """
+        template_id = finding.evidence.get("template_id")
+        if not template_id:
+            return False
+            
+        results = self._run_nuclei(finding.scan.target, templates=template_id)
+        
+        # If any result matches the template_id, it's verified
+        is_found = any(r.evidence.get("template_id") == template_id for r in results)
+        
+        if is_found:
+            # Update request/response with fresh ones
+            for r in results:
+                if r.evidence.get("template_id") == template_id:
+                    finding.request = r.request
+                    finding.response = r.response
+                    break
+            return True
+            
+        return False
 
     def _map_severity(self, nuclei_sev: str) -> Severity:
         mapping = {

@@ -35,11 +35,18 @@ class PDFGenerator:
     def _render_pdf(html_content):
         """Internal method to render HTML to PDF bytes."""
         try:
+            import os
+            from django.conf import settings
             # Lazy import: keeps the API bootable when WeasyPrint's native libs
             # (libgobject-2.0-0 / Pango) are not installed on the host.
             from weasyprint import HTML  # noqa: PLC0415
-            return HTML(string=html_content).write_pdf()
+            
+            # Set base_url to the templates/reports directory for assets like logo.png
+            template_path = os.path.join(settings.BASE_DIR, "reports", "templates", "reports")
+            
+            return HTML(string=html_content, base_url=template_path).write_pdf()
         except ImportError as e:
+
             logger.error(
                 "WeasyPrint is not available on this host (missing native GTK/Pango libs). "
                 "PDF generation requires a Linux/macOS environment with libgobject-2.0-0. "
