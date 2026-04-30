@@ -6,6 +6,7 @@ import os
 from typing import List
 from .base import BaseScanStrategy, register, FindingData
 from scans.models import Severity
+from scans.external.cvss_calculator import CVSS31Calculator
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +52,37 @@ class NucleiVulnStrategy(BaseScanStrategy):
                             continue
                         try:
                             data = json.loads(line)
+                            
+                            # 🚀 ENRICHED EVIDENCE
+                            evidence_dict = {
+                                "matched_at": data.get("matched-at", ""),
+                                "template_id": data.get("template-id", ""),
+                                "matcher_name": data.get("matcher-name", ""),
+                                "extracted_results": data.get("extracted-results", []),
+                                "type": data.get("type", "unknown")
+                            }
+                            
+                            # Add interaction data if available (for OAST)
+                            if data.get("interaction"):
+                                evidence_dict["interaction"] = data.get("interaction")
+
+                            # 🎯 DYNAMIC SCORING (CVSS v3.1)
+                            classification = data.get("info", {}).get("classification", {})
+                            cvss_score = classification.get("cvss-score")
+                            cvss_vector = classification.get("cvss-metrics")
+
+                            if cvss_vector and "CVSS:3.1" in cvss_vector:
+                                calc_score = CVSS31Calculator.calculate(cvss_vector)
+                                if calc_score > 0:
+                                    cvss_score = calc_score
+
                             findings.append(FindingData(
                                 title=data.get("info", {}).get("name", "Nuclei Finding"),
                                 description=data.get("info", {}).get("description", ""),
                                 severity=self._map_severity(data.get("info", {}).get("severity", "info")),
-                                evidence=f"Matched: {data.get('matched-at', '')}\nTemplate: {data.get('template-id', '')}",
+                                evidence=evidence_dict,
                                 remediation=data.get("info", {}).get("remediation", ""),
-                                cvss_score=data.get("info", {}).get("classification", {}).get("cvss-score")
+                                cvss_score=cvss_score
                             ))
                         except json.JSONDecodeError:
                             continue
@@ -99,3 +124,17 @@ class NucleiFullStrategy(NucleiVulnStrategy):
 
     def run(self, target, scan=None) -> List[FindingData]:
         return self._run_nuclei(target)  # No tags = all templates
+
+
+@register
+class NucleiTechStrategy(NucleiVulnStrategy):
+    """
+    Nuclei technology detection engine.
+    Used in Phase 1 to identify the stack (WAF, CMS, Framework).
+    """
+    slug = "nuclei_tech"
+    name = "Nuclei Technology Detection"
+
+    def run(self, target, scan=None) -> List[FindingData]:
+        # 'tech' tag is fast and identifies many frameworks/CMS
+        return self._run_nuclei(target, tags="tech,waf,detect")

@@ -79,9 +79,12 @@ VULNERABILITY_KB = {
 }
 
 # ── Model Configuration ─────────────────────────────────────────────────
-ANTHROPIC_MODEL_ID = "claude-3-5-sonnet-20241022"
+ANTHROPIC_MODEL_ID = "claude-sonnet-4-20250514"
 GEMINI_MODEL_ID = "gemini-2.0-flash"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+GITHUB_MODELS_URL = "https://models.inference.ai.azure.com/chat/completions"
+GITHUB_MODEL_ID = "gpt-4o" # Motor redundante via GitHub Models
 
 
 class AIService:
@@ -98,7 +101,8 @@ class AIService:
     def __init__(self):
         self.anthropic_client = None
         self.gemini_api_key = None
-        self.active_engine = None  # Track which engine is active
+        self.github_token = None
+        self.active_engine = None  
 
         # ── 1. Try Anthropic (Primary) ──────────────────────────────────
         anthropic_key = getattr(settings, 'ANTHROPIC_API_KEY', '') or os.getenv('ANTHROPIC_API_KEY', '')
@@ -122,6 +126,16 @@ class AIService:
             else:
                 logger.info("✅ Motor IA fallback (Google Gemini) disponível como secundário.")
 
+        # ── 3. Try GitHub Models (Redundant) ───────────────────────────
+        github_token = getattr(settings, 'GITHUB_TOKEN', '') or os.getenv('GITHUB_TOKEN', '')
+        if github_token:
+            self.github_token = github_token
+            if not self.active_engine:
+                self.active_engine = "github"
+                logger.info("✅ Motor IA redundante (GitHub Models) ativado como primário.")
+            else:
+                logger.info("✅ Motor IA redundante (GitHub Models) disponível.")
+
         if not self.active_engine:
             logger.warning("⚠️ Nenhuma chave de IA configurada. Serviço em modo fallback estático.")
 
@@ -144,6 +158,7 @@ class AIService:
         return {
             "anthropic": "active" if self.anthropic_client else "unavailable",
             "gemini": "active" if self.gemini_api_key else "unavailable",
+            "github": "active" if self.github_token else "unavailable",
             "primary_engine": self.active_engine or "fallback_static",
         }
 
@@ -157,13 +172,11 @@ class AIService:
             text = pattern.sub(replacement, text)
         return text
 
-    def _call_anthropic(self, user_prompt: str, max_tokens: int = 1024) -> str | None:
-        """
-        Chama o Claude via Anthropic SDK.
-        Retorna o texto da resposta ou None em caso de erro.
-        """
+    def _call_anthropic(self, user_prompt: str, max_tokens: int = 1024) -> tuple[str | None, object]:
+        """Chama o Claude via Anthropic SDK."""
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
         if not self.anthropic_client:
-            return None
+            return None, usage
         try:
             response = self.anthropic_client.messages.create(
                 model=ANTHROPIC_MODEL_ID,
@@ -171,32 +184,23 @@ class AIService:
                 system=SYSTEM_PROMPT_PT,
                 messages=[{"role": "user", "content": user_prompt}],
             )
-            return response.content[0].text
+            usage.input_tokens = getattr(response.usage, "input_tokens", 0)
+            usage.output_tokens = getattr(response.usage, "output_tokens", 0)
+            return response.content[0].text, usage
         except Exception as e:
             logger.error(f"❌ Erro na chamada ao Claude ({ANTHROPIC_MODEL_ID}): {e}")
-            return None
+            raise e # Raise to be handled by retry logic in _call_llm
 
-    def _call_gemini(self, user_prompt: str, max_tokens: int = 1024) -> str | None:
-        """
-        Chama o Gemini via REST API (sem SDK pesado).
-        Retorna o texto da resposta ou None em caso de erro.
-        """
+    def _call_gemini(self, user_prompt: str, max_tokens: int = 1024) -> tuple[str | None, object]:
+        """Chama o Gemini via REST API."""
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
         if not self.gemini_api_key:
-            return None
+            return None, usage
         try:
             url = f"{GEMINI_API_URL}/{GEMINI_MODEL_ID}:generateContent?key={self.gemini_api_key}"
             payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": f"{SYSTEM_PROMPT_PT}\n\n---\n\n{user_prompt}"}
-                        ]
-                    }
-                ],
-                "generationConfig": {
-                    "maxOutputTokens": max_tokens,
-                    "temperature": 0.3,
-                }
+                "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT_PT}\n\n---\n\n{user_prompt}"}]}],
+                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3}
             }
             with httpx.Client(timeout=60.0) as client:
                 response = client.post(url, json=payload)
@@ -207,85 +211,130 @@ class AIService:
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if parts:
-                    return parts[0].get("text", "")
-            logger.warning(f"⚠️ Gemini retornou resposta vazia: {data}")
-            return None
+                    meta = data.get("usageMetadata", {})
+                    usage.input_tokens = meta.get("promptTokenCount", 0)
+                    usage.output_tokens = meta.get("candidatesTokenCount", 0)
+                    return parts[0].get("text", ""), usage
+            return None, usage
         except Exception as e:
             logger.error(f"❌ Erro na chamada ao Gemini ({GEMINI_MODEL_ID}): {e}")
-            return None
+            raise e
+
+    def _call_github_models(self, user_prompt: str, max_tokens: int = 1024) -> tuple[str | None, object]:
+        """Chama o GitHub Models (Azure AI Inference API)."""
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        if not self.github_token:
+            return None, usage
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.github_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT_PT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "model": GITHUB_MODEL_ID,
+                "max_tokens": max_tokens,
+                "temperature": 0.3
+            }
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(GITHUB_MODELS_URL, headers=headers, json=payload)
+                response.raise_for_status()
+
+            data = response.json()
+            choices = data.get("choices", [])
+            if choices:
+                res_text = choices[0].get("message", {}).get("content", "")
+                meta = data.get("usage", {})
+                usage.input_tokens = meta.get("prompt_tokens", 0)
+                usage.output_tokens = meta.get("completion_tokens", 0)
+                return res_text, usage
+            return None, usage
+        except Exception as e:
+            logger.error(f"❌ Erro na chamada ao GitHub Models ({GITHUB_MODEL_ID}): {e}")
+            raise e
     def _call_llm(self, user_prompt: str, max_tokens: int = 1024) -> tuple[str | None, object]:
         """
-        Wrapper centralizado: tenta Anthropic primeiro, depois Gemini.
-        Retorna (texto_resposta, usage_object).
+        Wrapper centralizado com Fallback Multi-Modelo e Retry Automático.
         """
+        import time
         usage = SimpleNamespace(input_tokens=0, output_tokens=0)
         
-        # Try primary engine first
-        if self.anthropic_client:
-            try:
-                response = self.anthropic_client.messages.create(
-                    model=ANTHROPIC_MODEL_ID,
-                    max_tokens=max_tokens,
-                    system=SYSTEM_PROMPT_PT,
-                    messages=[{"role": "user", "content": user_prompt}],
-                )
-                res_text = response.content[0].text
-                usage.input_tokens = getattr(response.usage, "input_tokens", 0)
-                usage.output_tokens = getattr(response.usage, "output_tokens", 0)
-                return res_text, usage
-            except Exception as e:
-                logger.error(f"❌ Erro na chamada ao Claude: {e}")
-                logger.warning("⚠️ Anthropic falhou, tentando Gemini como fallback...")
+        # Engines em ordem de prioridade (respeitando engine ativa se forçada)
+        all_engines = [
+            ("anthropic", self._call_anthropic),
+            ("gemini", self._call_gemini),
+            ("github", self._call_github_models),
+        ]
+        
+        # Se houver uma engine ativa, movemos para o topo da lista
+        engines = []
+        if self.active_engine:
+            active = next((e for e in all_engines if e[0] == self.active_engine), None)
+            if active:
+                engines.append(active)
+        
+        for e in all_engines:
+            if e not in engines:
+                engines.append(e)
 
-        # Fallback to Gemini
-        if self.gemini_api_key:
-            try:
-                url = f"{GEMINI_API_URL}/{GEMINI_MODEL_ID}:generateContent?key={self.gemini_api_key}"
-                payload = {
-                    "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT_PT}\n\n---\n\n{user_prompt}"}]}],
-                    "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3}
-                }
-                with httpx.Client(timeout=60.0) as client:
-                    response = client.post(url, json=payload)
-                    response.raise_for_status()
-
-                data = response.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        res_text = parts[0].get("text", "")
-                        # Gemini usage metadata
-                        meta = data.get("usageMetadata", {})
-                        usage.input_tokens = meta.get("promptTokenCount", 0)
-                        usage.output_tokens = meta.get("candidatesTokenCount", 0)
-                        return res_text, usage
-                logger.warning(f"⚠️ Gemini retornou resposta vazia: {data}")
-            except Exception as e:
-                logger.error(f"❌ Erro na chamada ao Gemini: {e}")
+        for engine_name, engine_func in engines:
+            # Tenta até 3 vezes com backoff exponencial se houver erro de Rate Limit (429)
+            for attempt in range(3):
+                try:
+                    result, engine_usage = engine_func(user_prompt, max_tokens)
+                    if result:
+                        usage.input_tokens = getattr(engine_usage, "input_tokens", 0)
+                        usage.output_tokens = getattr(engine_usage, "output_tokens", 0)
+                        return result, usage
+                except Exception as e:
+                    # Se for 429 (Rate Limit) ou 503 (Overloaded), espera e tenta novamente
+                    error_msg = str(e)
+                    if "429" in error_msg or "503" in error_msg or "overloaded" in error_msg.lower():
+                        wait_time = (2 ** attempt) + 1
+                        logger.warning(f"⚠️ {engine_name} congestionado. Aguardando {wait_time}s (Tentativa {attempt+1}/3)...")
+                        time.sleep(wait_time)
+                        continue
+                    
+                    logger.error(f"❌ Motor {engine_name} falhou: {error_msg}")
+                    break # Pula para o próximo motor
 
         return None, usage
 
     # ── 1. explain_finding ──────────────────────────────────────────────
 
     @ai_action(action="explain_finding", cache_ttl=3600)
-    def explain_finding(self, finding_title: str, description: str, severity: str) -> tuple[str, object]:
+    def explain_finding(self, finding_title: str, description: str, severity: str, evidence: dict = None, **kwargs) -> tuple[str, object]:
         """Gera explicação detalhada de uma vulnerabilidade em PT-BR."""
         safe_title = self._redact_pii(finding_title)
         safe_desc = self._redact_pii(description)
+        
+        # Serialize evidence for the prompt
+        evidence_str = ""
+        if evidence:
+            try:
+                evidence_str = json.dumps(evidence, indent=2)
+                evidence_str = self._redact_pii(evidence_str)
+            except Exception:
+                evidence_str = str(evidence)
 
         if not self.has_ai:
             return self._fallback_explanation(safe_title, severity), SimpleNamespace(input_tokens=0, output_tokens=0)
 
         prompt = (
-            f"Explique detalhadamente a seguinte vulnerabilidade encontrada pelo HackerScan Pro.\n\n"
+            f"Como um Especialista Sênior em Segurança Cibernética, forneça uma análise técnica profunda "
+            f"sobre a seguinte vulnerabilidade detectada pelo HackerScan Pro.\n\n"
             f"Título: {safe_title}\n"
             f"Severidade: {severity}\n"
-            f"Descrição Original: {safe_desc}\n\n"
-            "Estruture a resposta em:\n"
-            "1. O que é esta vulnerabilidade?\n"
-            "2. Qual o risco real para o negócio?\n"
-            "3. Como um atacante exploraria isso?"
+            f"Descrição Técnica: {safe_desc}\n"
+            f"Evidência Técnica (RAW DATA): {evidence_str}\n\n"
+            "Sua resposta deve ser exaustiva e estruturada da seguinte forma:\n"
+            "1. **Análise de Causa Raiz**: Explique tecnicamente por que esta falha ocorre a nível de código ou configuração, analisando os dados fornecidos na evidência.\n"
+            "2. **Vetores de Ataque**: Descreva múltiplos cenários de como um atacante persistente (APT) ou oportunista poderia explorar esta falha específica.\n"
+            "3. **Impacto Estratégico**: Detalhe o impacto não apenas técnico, mas também jurídico (ex: LGPD), financeiro e de reputação.\n"
+            "4. **Relação com OWASP/MITRE**: Cite as categorias específicas do OWASP Top 10 ou técnicas do MITRE ATT&CK relacionadas."
         )
 
         result, usage = self._call_llm(prompt, max_tokens=1000)
@@ -296,23 +345,33 @@ class AIService:
     # ── 2. generate_remediation_code ───────────────────────────────────
 
     @ai_action(action="remediation_code", cache_ttl=86400)
-    def generate_remediation_code(self, finding_title: str, description: str) -> tuple[str, object]:
+    def generate_remediation_code(self, finding_title: str, description: str, evidence: dict = None, **kwargs) -> tuple[str, object]:
         """Gera guia de correção passo a passo com exemplos de código em PT-BR."""
         safe_title = self._redact_pii(finding_title)
         safe_desc = self._redact_pii(description)
+        
+        evidence_str = ""
+        if evidence:
+            try:
+                evidence_str = json.dumps(evidence, indent=2)
+                evidence_str = self._redact_pii(evidence_str)
+            except Exception:
+                evidence_str = str(evidence)
 
         if not self.has_ai:
             return self._fallback_remediation(safe_title), SimpleNamespace(input_tokens=0, output_tokens=0)
 
         prompt = (
-            f"Forneça um guia de correção passo a passo para a seguinte falha de segurança.\n\n"
+            f"Gere um Plano de Remediação detalhado e acionável para a seguinte falha de segurança.\n\n"
             f"Título: {safe_title}\n"
-            f"Descrição: {safe_desc}\n\n"
-            "Inclua:\n"
-            "- Passos imediatos de correção.\n"
-            "- Exemplos de código seguro (antes/depois).\n"
-            "- Como verificar se a correção funcionou.\n"
-            "- Melhores práticas para prevenção futura."
+            f"Contexto: {safe_desc}\n"
+            f"Evidência Técnica: {evidence_str}\n\n"
+            "O plano deve incluir:\n"
+            "1. **Ação Imediata (Quick Fix)**: Como mitigar o risco nas próximas 2 horas, considerando os detalhes técnicos da evidência.\n"
+            "2. **Correção Definitiva**: Instruções passo a passo para resolver a causa raiz.\n"
+            "3. **Exemplos de Código Seguro**: Forneça blocos de código 'Vulnerável' vs 'Protegido' (Clean Code) aplicáveis ao contexto.\n"
+            "4. **Verificação de Eficácia**: Comandos ou testes específicos para validar se a correção foi bem-sucedida.\n"
+            "5. **Controles Compensatórios**: Sugestões de WAF rules, monitoramento ou hardening adicional."
         )
 
         result, usage = self._call_llm(prompt, max_tokens=1200)
@@ -323,33 +382,153 @@ class AIService:
     # ── 3. predict_attack_chains ────────────────────────────────────────
 
     @ai_action(action="attack_chains", cache_ttl=3600)
-    def predict_attack_chains(self, findings: list[dict]) -> tuple[str, object]:
+    def predict_attack_chains(self, findings: list[dict], **kwargs) -> tuple[str, object]:
         """Recebe uma lista de findings e prevê cadeias de ataque combinadas."""
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        
         if not findings:
-            return "Nenhuma vulnerabilidade fornecida.", SimpleNamespace(input_tokens=0, output_tokens=0)
+            # 🚀 NEW: Even with no findings, we can provide a Posture Analysis
+            if not self.has_ai:
+                return "Análise de Postura: Nenhuma vulnerabilidade crítica detectada na superfície exposta.", usage
+            
+            prompt = (
+                "O scan não detectou vulnerabilidades ativas (findings). "
+                "Como um Especialista em Defesa Cibernética, forneça uma 'Análise de Postura Preventiva'.\n\n"
+                "Sua análise deve:\n"
+                "1. **Resumo de Higiene Cibernética**: Explique que a ausência de findings é um sinal positivo de configuração inicial.\n"
+                "2. **Monitoramento Contínuo**: Por que o monitoramento constante é necessário mesmo sem falhas imediatas.\n"
+                "3. **Vetores de Shadow IT**: Mencione o risco de serviços ocultos que podem surgir.\n"
+                "4. **Recomendação Proativa**: Sugira a implementação de Zero Trust ou Hardening adicional."
+            )
+            result, usage = self._call_llm(prompt, max_tokens=800)
+            return result or "Postura de segurança sólida. Continue monitorando.", usage
 
         if not self.has_ai:
-            return self._fallback_attack_chain(findings), SimpleNamespace(input_tokens=0, output_tokens=0)
+            return self._fallback_attack_chain(findings), usage
 
         findings_text = "\n".join(
-            f"- [{f.get('severity', 'N/A')}] {f.get('title', 'Sem título')}: {f.get('description', '')[:200]}"
+            f"- [{f.get('severity', 'N/A')}] {f.get('title', 'Sem título')}: {f.get('description', '')[:200]}\n  Evidência: {json.dumps(f.get('evidence', {}))[:150]}"
             for f in findings
         )
 
         prompt = (
-            "Com base nas vulnerabilidades listadas abaixo, preveja possíveis cadeias de ataque...\n"
-            f"Vulnerabilidades encontradas:\n{findings_text}\n\n"
-            "Para cada cadeia de ataque identificada, descreva:\n"
-            "1. Sequência de exploração (passo a passo).\n"
-            "2. Impacto potencial no negócio.\n"
-            "3. Probabilidade estimada (Alta / Média / Baixa).\n"
-            "4. Mitigação prioritária recomendada."
+            "Como um Analista de Threat Intelligence (Red Team), realize uma correlação avançada entre as vulnerabilidades "
+            "listadas abaixo para prever cadeias de ataque (Kill Chains) complexas.\n\n"
+            f"Inventário de Vulnerabilidades:\n{findings_text}\n\n"
+            "Sua análise deve conter:\n"
+            "1. **Cadeias de Exploração Combinadas**: Explique como as falhas detectadas podem ser encadeadas (Attack Chaining). Use uma abordagem de 'Caminho Crítico'.\n"
+            "2. **Ponto de Entrada Crítico**: Identifique o 'paciente zero' (vetor inicial) para o comprometimento total.\n"
+            "3. **Movimentação Lateral & Escalação**: Preveja como um atacante se moveria dentro da rede ou escalaria privilégios.\n"
+            "4. **Visualização de Risco (Grafo)**: Descreva o fluxo do ataque passo a passo (ex: Passo 1 -> Passo 2 -> Objetivo Final).\n"
+            "5. **Estratégia de Interrupção**: Qual o ponto exato da cadeia que, se corrigido, interrompe todo o fluxo de ataque."
         )
 
         result, usage = self._call_llm(prompt, max_tokens=1500)
         if result:
             return result, usage
         return self._fallback_attack_chain(findings), usage
+
+    # ── 4. suggest_scan_strategy ───────────────────────────────────────
+
+    @ai_action(action="suggest_strategy", cache_ttl=3600)
+    def suggest_scan_strategy(self, recon_findings: list[dict], available_strategies: list[str]) -> tuple[dict, object]:
+        """
+        Analyze recon findings and suggest which targeted strategies to run.
+        Returns a JSON-formatted dict with 'recommended_strategies' and 'nuclei_tags'.
+        """
+        if not recon_findings:
+            return {"recommended_strategies": [], "nuclei_tags": "cve,vuln"}, SimpleNamespace(input_tokens=0, output_tokens=0)
+
+        findings_text = "\n".join(
+            f"- {f.get('title', 'Finding')}: {f.get('description', '')} (Evidence: {json.dumps(f.get('evidence', {}))})"
+            for f in recon_findings
+        )
+
+        prompt = (
+            "Como um Especialista em Red Teaming, analise os resultados da fase de Reconhecimento abaixo "
+            "e decida quais estratégias de ataque e auditoria devem ser priorizadas.\n\n"
+            f"Resultados de Reconhecimento:\n{findings_text}\n\n"
+            f"Estratégias Disponíveis:\n{', '.join(available_strategies)}\n\n"
+            "Sua resposta deve ser EXCLUSIVAMENTE um objeto JSON válido no seguinte formato:\n"
+            "{\n"
+            "  \"recommended_strategies\": [\"slug1\", \"slug2\"],\n"
+            "  \"nuclei_tags\": \"comma,separated,tags\",\n"
+            "  \"reasoning\": \"Breve explicação técnica em Português\"\n"
+            "}\n"
+            "Priorize estratégias que façam sentido para os serviços encontrados (ex: sqlmap se houver DB, dir_fuzzing se houver Web)."
+        )
+
+        result, usage = self._call_llm(prompt, max_tokens=500)
+        if result:
+            try:
+                # Basic JSON cleaning in case of markdown blocks
+                json_str = result.strip()
+                if "```json" in json_str:
+                    json_str = json_str.split("```json")[1].split("```")[0].strip()
+                elif "```" in json_str:
+                    json_str = json_str.split("```")[1].split("```")[0].strip()
+                
+                return json.loads(json_str), usage
+            except (json.JSONDecodeError, IndexError):
+                logger.error("AI returned invalid JSON for suggest_scan_strategy")
+        
+        return {"recommended_strategies": available_strategies[:3], "nuclei_tags": "cve,vuln"}, usage
+
+    # ── 5. analyze_false_positive ──────────────────────────────────────
+    
+    @ai_action(action="analyze_fp", cache_ttl=3600)
+    def analyze_false_positive(self, finding_title: str, description: str, evidence: dict | str) -> tuple[dict, object]:
+        """
+        Analisa se uma descoberta (finding) é um falso positivo com base na evidência técnica.
+        Retorna um dicionário com 'is_false_positive' (bool), 'confidence' (float) e 'reasoning'.
+        """
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        
+        safe_title = self._redact_pii(finding_title)
+        safe_desc = self._redact_pii(description)
+        
+        evidence_str = ""
+        if isinstance(evidence, dict):
+            try:
+                evidence_str = json.dumps(evidence, indent=2)
+                evidence_str = self._redact_pii(evidence_str)
+            except Exception:
+                evidence_str = str(evidence)
+        else:
+            evidence_str = self._redact_pii(str(evidence))
+
+        if not self.has_ai:
+            return {"is_false_positive": False, "confidence": 0.0, "reasoning": "IA indisponível para validação."}, usage
+
+        prompt = (
+            "Como um Auditor de Segurança Sênior, analise a seguinte descoberta para determinar se ela é um Falso Positivo.\n\n"
+            f"Título: {safe_title}\n"
+            f"Descrição: {safe_desc}\n"
+            f"Evidência Técnica (RAW DATA): {evidence_str}\n\n"
+            "Sua tarefa é verificar se a evidência realmente confirma a vulnerabilidade ou se o scanner se enganou "
+            "(ex: erro HTTP 404 interpretado como falha, cabeçalhos de simulação, respostas de honeypot).\n\n"
+            "Sua resposta deve ser EXCLUSIVAMENTE um objeto JSON válido no seguinte formato:\n"
+            "{\n"
+            "  \"is_false_positive\": true/false,\n"
+            "  \"confidence\": 0.0 a 1.0,\n"
+            "  \"reasoning\": \"Explicação técnica concisa em Português\"\n"
+            "}"
+        )
+
+        result, usage = self._call_llm(prompt, max_tokens=500)
+        if result:
+            try:
+                json_str = result.strip()
+                if "```json" in json_str:
+                    json_str = json_str.split("```json")[1].split("```")[0].strip()
+                elif "```" in json_str:
+                    json_str = json_str.split("```")[1].split("```")[0].strip()
+                
+                return json.loads(json_str), usage
+            except (json.JSONDecodeError, IndexError):
+                logger.error("AI returned invalid JSON for analyze_false_positive")
+        
+        return {"is_false_positive": False, "confidence": 0.0, "reasoning": "Erro ao processar resposta da IA."}, usage
 
     # ── Fallbacks (sempre em PT, nunca raise) ───────────────────────────
 

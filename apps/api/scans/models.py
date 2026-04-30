@@ -199,14 +199,26 @@ class Scan(UUIDModel, TimestampedModel):
         self.save(update_fields=["status", "finished_at", "error_message"])
 
     def _refresh_finding_counts(self):
-        qs = self.findings.values("severity").annotate(count=models.Count("id"))
-        counts = {row["severity"]: row["count"] for row in qs}
-        self.critical_count = counts.get("critical", 0)
-        self.high_count     = counts.get("high", 0)
-        self.medium_count   = counts.get("medium", 0)
-        self.low_count      = counts.get("low", 0)
-        self.info_count     = counts.get("info", 0)
-        self.total_findings = sum(counts.values())
+        from django.db.models import Count # noqa: PLC0415
+        qs = self.findings.values("severity").annotate(count=Count("id"))
+        
+        # Initialize counts
+        self.critical_count = 0
+        self.high_count     = 0
+        self.medium_count   = 0
+        self.low_count      = 0
+        self.info_count     = 0
+        self.total_findings = 0
+
+        for row in qs:
+            sev = row["severity"].lower() if row["severity"] else ""
+            cnt = row["count"]
+            if sev == "critical": self.critical_count += cnt
+            elif sev == "high":   self.high_count += cnt
+            elif sev == "medium": self.medium_count += cnt
+            elif sev == "low":    self.low_count += cnt
+            elif sev == "info":   self.info_count += cnt
+            self.total_findings += cnt
 
 
 # ─── ScheduledScan ───────────────────────────────────────────────────────────
@@ -264,6 +276,7 @@ class Finding(UUIDModel, TimestampedModel):
     fingerprint = models.CharField(max_length=64, blank=True, db_index=True,
                                    help_text="SHA-256 of (scan.target_id, plugin_slug, title)")
     is_false_positive = models.BooleanField(default=False)
+    ai_reasoning = models.TextField(blank=True, null=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
