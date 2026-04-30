@@ -20,6 +20,8 @@ body {
     color: #111827;
     line-height: 1.5;
     margin: 0;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
 }
 
 h1, h2, h3, h4 {
@@ -79,6 +81,8 @@ h1, h2, h3, h4 {
     font-family: 'Courier New', Courier, monospace;
     font-size: 9pt;
     white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
     border-left: 4px solid #9ca3af;
     margin: 1em 0;
 }

@@ -29,4 +29,11 @@ class WorkspaceScopedViewMixin:
         if membership:
             return str(membership.workspace_id)
             
+        # Global Admin/Superadmin final fallback: resolve to any active workspace in the system
+        if request.user.role in ["admin", "superadmin"]:
+            from users.models import Workspace
+            ws = Workspace.objects.filter(is_active=True).first()
+            if ws:
+                return str(ws.id)
+
         return None

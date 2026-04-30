@@ -7,13 +7,19 @@ class SecurityModuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecurityModule
         fields = [
-            "id", "slug", "name", "description", "category",
-            "price_monthly", "price_yearly", "stripe_price_id",
-            "icon", "badge", "unlocked_strategies", "is_purchased",
-            "created_at"
+            "id", "slug", "name", "description", "short_description",
+            "price", "currency", "stripe_price_id",
+            "icon", "unlocked_strategies", "config_schema",
+            "is_purchased", "created_at"
         ]
 
     def get_is_purchased(self, obj) -> bool:
+        request = self.context.get("request")
+        if request and request.user:
+            from users.models import UserRole
+            if request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+                return True
+
         workspace_id = self.context.get("workspace_id")
         if not workspace_id:
             return False

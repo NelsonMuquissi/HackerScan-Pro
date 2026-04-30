@@ -6,6 +6,8 @@ interface User {
   email: string;
   name: string;
   plan?: string;
+  role: string;
+  workspace_id?: string;
 }
 
 interface AuthState {
@@ -29,7 +31,7 @@ export const useAuthStore = create<AuthState>()(
       login: (user, token, workspaceId) => set({ 
         user, 
         token, 
-        workspaceId: workspaceId || (user as any).workspace_id || null,
+        workspaceId: workspaceId || user.workspace_id || null,
         isAuthenticated: true 
       }),
       logout: () => {

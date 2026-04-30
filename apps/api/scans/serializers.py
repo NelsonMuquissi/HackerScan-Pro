@@ -42,6 +42,7 @@ class FindingSerializer(serializers.ModelSerializer):
             "remediation", "evidence", "cvss_score", "epss_score",
             "fingerprint", "is_false_positive", "ai_reasoning", "first_seen_at", "last_seen_at",
             "resolved_at", "created_at", "ai_explanation", "ai_remediation",
+            "request", "response", "poc", "is_verified",
         ]
         read_only_fields = fields
 

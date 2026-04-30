@@ -24,6 +24,7 @@ class SecurityModule(models.Model):
     # Technical Mapping
     # Modules unlock specific strategies in the scan engine
     unlocked_strategies = models.JSONField(default=list, help_text=_("List of scan Strategy internal names unlocked by this module"))
+    config_schema = models.JSONField(default=dict, help_text=_("JSON schema for module-specific configuration options"))
     
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

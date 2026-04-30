@@ -39,7 +39,9 @@ export default function LoginPage() {
         id: userData.id,
         email: userData.email,
         name: userData.full_name || userData.email,
-        plan: userData.subscription_plan || 'Free'
+        plan: userData.subscription_plan || 'Free',
+        role: userData.role,
+        workspace_id: userData.workspace_id
       }, tokens.access);
       
       router.push('/dashboard');

@@ -18,6 +18,7 @@ class AIWalletSerializer(serializers.ModelSerializer):
     """Public wallet view — balance breakdown only."""
 
     balance_total = serializers.IntegerField(read_only=True)
+    is_unlimited = serializers.SerializerMethodField()
 
     class Meta:
         model = AIWallet
@@ -28,6 +29,7 @@ class AIWalletSerializer(serializers.ModelSerializer):
             "balance_purchased",
             "balance_bonus",
             "balance_total",
+            "is_unlimited",
             "lifetime_credits_granted",
             "lifetime_credits_used",
             "auto_reload_enabled",
@@ -38,6 +40,14 @@ class AIWalletSerializer(serializers.ModelSerializer):
             "rollover_credits",
         ]
         read_only_fields = fields
+
+    def get_is_unlimited(self, obj) -> bool:
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        
+        from users.models import UserRole
+        return request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]
 
 
 class AITransactionSerializer(serializers.ModelSerializer):

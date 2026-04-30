@@ -48,7 +48,15 @@ export const AICreditBadge: React.FC<AICreditBadgeProps> = ({
         
         {showText && (
           <span className="text-xs font-bold whitespace-nowrap">
-            {wallet.balance_total.toLocaleString()} <span className="opacity-70 font-medium">créditos</span>
+            {wallet.is_unlimited ? (
+              <span className="flex items-center gap-1">
+                ∞ <span className="opacity-70 font-medium">créditos</span>
+              </span>
+            ) : (
+              <>
+                {wallet.balance_total.toLocaleString()} <span className="opacity-70 font-medium">créditos</span>
+              </>
+            )}
           </span>
         )}
 

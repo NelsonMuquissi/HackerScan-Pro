@@ -11,6 +11,7 @@ export interface AIWallet {
   balance_bonus: number;
   is_low_balance: boolean;
   can_use_express: boolean;
+  is_unlimited: boolean;
 }
 
 export function useAICredits(providedWorkspaceId?: string) {

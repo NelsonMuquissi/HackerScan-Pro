@@ -21,7 +21,6 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
 
     def run(self, target, scan=None) -> List[FindingData]:
         findings = []
-        # target.host is the correct field (target.address does not exist on ScanTarget)
         host = target.host
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
@@ -43,8 +42,10 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                     title="SSL/TLS Audit Error",
                     description=f"sslyze could not connect to {host}. It may not support HTTPS.",
                     severity=Severity.INFO,
-                    evidence=result.stderr[:500] if result.stderr else "",
+                    evidence={"error": result.stderr[:1000]},
                     remediation="Verify that the target supports HTTPS on port 443.",
+                    poc=f"sslyze {host}",
+                    plugin_slug=self.slug
                 ))
                 return findings
 
@@ -58,6 +59,7 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
 
                     for server_result in data.get("server_scan_results", []):
                         scan_res = server_result.get("scan_result", {})
+                        common_poc = f"sslyze {host}"
 
                         # Heartbleed
                         heartbleed = scan_res.get("heartbleed", {})
@@ -67,7 +69,10 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                                 severity=Severity.CRITICAL,
                                 description=f"The server at {host} is vulnerable to Heartbleed (CVE-2014-0160).",
                                 remediation="Patch OpenSSL to a version >= 1.0.1g and regenerate all keys/certificates.",
+                                evidence=heartbleed.get("result"),
                                 cvss_score=7.5,
+                                poc=common_poc,
+                                plugin_slug=self.slug
                             ))
 
                         # OpenSSL CCS injection (CVE-2014-0224)
@@ -78,10 +83,13 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                                 severity=Severity.HIGH,
                                 description=f"Server at {host} is vulnerable to OpenSSL CCS Injection (CVE-2014-0224).",
                                 remediation="Update OpenSSL to a patched version.",
+                                evidence=ccs.get("result"),
                                 cvss_score=6.8,
+                                poc=common_poc,
+                                plugin_slug=self.slug
                             ))
 
-                        # Deprecated TLS protocols (SSLv2, SSLv3, TLS 1.0, TLS 1.1)
+                        # Deprecated TLS protocols
                         deprecated_protos = []
                         for proto_key, proto_name in [
                             ("ssl_2_0_cipher_suites", "SSLv2"),
@@ -107,8 +115,10 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                                     "Disable SSLv2, SSLv3, TLS 1.0, and TLS 1.1. "
                                     "Configure the server to support only TLS 1.2 and TLS 1.3."
                                 ),
-                                evidence=f"Deprecated protocols detected: {', '.join(deprecated_protos)}",
+                                evidence={"deprecated_protocols": deprecated_protos},
                                 cvss_score=5.3,
+                                poc=common_poc,
+                                plugin_slug=self.slug
                             ))
 
                         # If no issues found, report a clean audit
@@ -117,11 +127,23 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                                 title="SSL/TLS Audit Passed",
                                 description=f"No critical SSL/TLS issues found on {host}.",
                                 severity=Severity.INFO,
-                                evidence=f"sslyze completed scan for {host}.",
+                                evidence={"status": "clean", "host": host},
                                 remediation="Continue monitoring certificate expiry and protocol support.",
+                                poc=common_poc,
+                                plugin_slug=self.slug
                             ))
         finally:
             if os.path.exists(output_file):
                 os.remove(output_file)
 
         return findings
+
+    def verify(self, finding: "Finding") -> bool:
+        """
+        Verify by re-running sslyze for the specific target.
+        """
+        host = finding.scan.target.host
+        results = self.run(finding.scan.target)
+        
+        # If any finding in the new results has the same title, it's verified
+        return any(r.title == finding.title for r in results)

@@ -115,3 +115,26 @@ class DNSAuditStrategy(BaseScanStrategy):
         except Exception as e:
             logger.error(f"TXT analysis error: {e}")
         return findings
+    def verify(self, finding: "Finding") -> bool:
+        """
+        Verify DNS findings by re-running the specific dig command.
+        """
+        evidence = finding.evidence
+        if not isinstance(evidence, dict):
+            return False
+            
+        domain = finding.scan.target.host
+        
+        # Determine what to verify based on title or evidence
+        if "AXFR" in finding.title:
+            ns = evidence.get("ns")
+            if not ns: return False
+            results = self._attempt_axfr(domain, ns, None)
+            return len(results) > 0
+            
+        elif "SPF" in finding.title or "Verification Token" in finding.title:
+            results = self._analyze_txt_records(domain, None)
+            # Check if any result has the same title
+            return any(r.title == finding.title for r in results)
+            
+        return False

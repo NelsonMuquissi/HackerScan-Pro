@@ -9,23 +9,33 @@ STRATEGY_MODULE_REQUIREMENTS = {
     ScanType.SAP_AUDIT: 'sap-audit',
 }
 
-def check_module_access(workspace, scan_type) -> bool:
+def check_module_access(workspace, scan_type, user=None) -> bool:
     """
     Returns True if the workspace has access to the requested scan_type.
     Standard scan types are always accessible.
     Specialized scan types require an active MarketplaceModule.
+    Admins and SuperAdmins have access to everything.
     """
+    from users.models import UserRole # noqa: PLC0415
+    if user and user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+        return True
+
     required_slug = STRATEGY_MODULE_REQUIREMENTS.get(scan_type)
     if not required_slug:
         return True  # Standard module
     
     # Check if workspace has an active purchase for this module
-    return has_module_access(workspace, required_slug)
+    return has_module_access(workspace, required_slug, user=user)
 
-def has_module_access(workspace, module_slug: str) -> bool:
+def has_module_access(workspace, module_slug: str, user=None) -> bool:
     """
     Returns True if the workspace has an active purchase/subscription for the specific module.
+    Admins and SuperAdmins have access to everything.
     """
+    from users.models import UserRole # noqa: PLC0415
+    if user and user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+        return True
+
     from django.db.models import Q
     return WorkspaceModule.objects.filter(
         workspace=workspace,
@@ -35,10 +45,20 @@ def has_module_access(workspace, module_slug: str) -> bool:
         Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
     ).exists()
 
-def get_unlocked_scan_types(workspace) -> list[str]:
+def get_unlocked_scan_types(workspace, user=None) -> list[str]:
     """
     Returns a list of all scan types accessible to this workspace.
+    Admins and SuperAdmins get all available scan types.
     """
+    from users.models import UserRole # noqa: PLC0415
+    if user and user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+        return [
+            ScanType.QUICK, ScanType.FULL, ScanType.VULN, 
+            ScanType.RECON, ScanType.SSL, ScanType.FUZZ, 
+            ScanType.DISCOVERY, ScanType.AD_AUDIT, 
+            ScanType.K8S_SECURITY, ScanType.SAP_AUDIT
+        ]
+
     # Base scan types
     unlocked = [
         ScanType.QUICK, ScanType.FULL, ScanType.VULN, 

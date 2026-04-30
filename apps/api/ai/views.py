@@ -106,7 +106,7 @@ class AIScanPredictionView(WorkspaceScopedViewMixin, views.APIView):
         #     )
             
         # Get findings for this scan
-        findings_qs = Finding.objects.filter(scan=scan, status='active').order_by('-severity')[:15]
+        findings_qs = Finding.objects.filter(scan=scan, status__iexact='active').order_by('-severity')[:15]
         findings_data = [
             {
                 "title": f.title,

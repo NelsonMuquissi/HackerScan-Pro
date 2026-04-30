@@ -12,7 +12,7 @@ import {
   Command
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAIScanPrediction } from '@/lib/api';
+import { getScanAIPrediction } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { InsufficientCreditsModal } from '../ai/InsufficientCreditsModal';
 
@@ -33,7 +33,7 @@ export function AIAnalysisSection({ scanId }: AIAnalysisSectionProps) {
     setError(null);
     setCreditError(null);
     try {
-      const data = await getAIScanPrediction(scanId);
+      const data = await getScanAIPrediction(scanId);
       setPrediction(data.prediction);
     } catch (err: any) {
       if (err.status === 402) {

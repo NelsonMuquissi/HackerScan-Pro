@@ -12,35 +12,36 @@ Checks:
   - X-XSS-Protection (deprecated check)   → still present? → info
   - Server header leakage                  → present = low
 """
-import urllib.request
-import urllib.error
-
+import logging
+from typing import List
 from .base import BaseScanStrategy, FindingData, register
+from scans.models import Severity
+from scans.utils import make_evidence_request
 
-TIMEOUT = 10  # seconds
+logger = logging.getLogger(__name__)
+
+TIMEOUT = 15
 
 HEADER_CHECKS = [
     {
         "header":      "Strict-Transport-Security",
-        "severity":    "medium",
+        "severity":    Severity.MEDIUM,
         "title":       "Missing Strict-Transport-Security (HSTS) header",
-        "description": "HSTS instructs browsers to only communicate over HTTPS. "
-                       "Without it, users may be subject to SSL-stripping attacks.",
+        "description": "HSTS instructs browsers to only communicate over HTTPS. Without it, users may be subject to SSL-stripping attacks.",
         "remediation": "Add: Strict-Transport-Security: max-age=31536000; includeSubDomains",
         "cvss_score":  5.4,
     },
     {
         "header":      "Content-Security-Policy",
-        "severity":    "medium",
+        "severity":    Severity.MEDIUM,
         "title":       "Missing Content-Security-Policy (CSP) header",
-        "description": "CSP restricts which resources browsers can load. "
-                       "Without it, XSS attacks are easier to exploit.",
+        "description": "CSP restricts which resources browsers can load. Without it, XSS attacks are easier to exploit.",
         "remediation": "Define a strict CSP policy appropriate for your application.",
         "cvss_score":  5.0,
     },
     {
         "header":      "X-Frame-Options",
-        "severity":    "medium",
+        "severity":    Severity.MEDIUM,
         "title":       "Missing X-Frame-Options header",
         "description": "Without X-Frame-Options, the site may be vulnerable to clickjacking.",
         "remediation": "Add: X-Frame-Options: DENY or SAMEORIGIN",
@@ -48,116 +49,167 @@ HEADER_CHECKS = [
     },
     {
         "header":      "X-Content-Type-Options",
-        "severity":    "low",
+        "severity":    Severity.LOW,
         "title":       "Missing X-Content-Type-Options header",
-        "description": "Without this header, browsers may MIME-sniff responses, "
-                       "enabling content injection attacks.",
+        "description": "Without this header, browsers may MIME-sniff responses, enabling content injection attacks.",
         "remediation": "Add: X-Content-Type-Options: nosniff",
+        "cvss_score": 2.6,
     },
     {
         "header":      "Referrer-Policy",
-        "severity":    "low",
+        "severity":    Severity.LOW,
         "title":       "Missing Referrer-Policy header",
-        "description": "Without a Referrer-Policy, sensitive URLs in the Referer header "
-                       "may be leaked to third parties.",
+        "description": "Without a Referrer-Policy, sensitive URLs in the Referer header may be leaked to third parties.",
         "remediation": "Add: Referrer-Policy: strict-origin-when-cross-origin",
-    },
-    {
-        "header":      "Permissions-Policy",
-        "severity":    "info",
-        "title":       "Missing Permissions-Policy header",
-        "description": "This header controls which browser features the page can use. "
-                       "Its absence is not immediately dangerous but is a best practice.",
-        "remediation": "Add a Permissions-Policy header to restrict unused browser capabilities.",
-    },
+        "cvss_score": 2.1,
+    }
 ]
-
 
 @register
 class HeadersCheckStrategy(BaseScanStrategy):
-    name        = "HTTP Security Headers Check"
-    slug        = "headers_check"
-    description = "Fetches the target URL and audits HTTP response headers for security best practices."
+    """
+    HTTP Security Headers Check strategy.
+    Audits response headers for security best practices and misconfigurations using standardized evidence.
+    """
+    slug = "headers_check"
+    name = "HTTP Security Headers Audit"
+    description = "Inspects HTTP response headers for missing security controls and sensitive information leaks."
 
-    def run(self, target, scan) -> list[FindingData]:
-        host     = target.host
-        scheme   = scan.config.get("scheme", "https")
-        url      = f"{scheme}://{host}"
-        findings: list[FindingData] = []
+    def run(self, target, scan=None) -> List[FindingData]:
+        host = target.host
+        url = host if host.startswith("http") else f"https://{host}"
+        findings = []
 
-        self.log(scan, f"Fetching HTTP headers from {url}...")
+        self.log(scan, f"Auditing security headers on {url}...")
         try:
-            # Try HEAD first for efficiency
-            req = urllib.request.Request(url, headers={"User-Agent": "HackScanPro/1.0"}, method="HEAD")
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                headers = {k.lower(): v for k, v in resp.headers.items()}
-                self.log(scan, f"Connection successful (HEAD). Received {len(headers)} headers.")
-        except urllib.error.HTTPError as exc:
-            if exc.code in (405, 501):  # Method Not Allowed or Not Implemented
-                self.log(scan, f"HEAD request not allowed (HTTP {exc.code}), falling back to GET...")
-                try:
-                    req = urllib.request.Request(url, headers={"User-Agent": "HackScanPro/1.0"}, method="GET")
-                    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                        headers = {k.lower(): v for k, v in resp.headers.items()}
-                        self.log(scan, f"Connection successful (GET). Received {len(headers)} headers.")
-                except urllib.error.URLError as exc2:
-                    return self._handle_error(url, exc2, findings)
-            else:
-                return self._handle_error(url, exc, findings)
-        except urllib.error.URLError as exc:
-            return self._handle_error(url, exc, findings)
+            resp, req_dump, res_dump, poc = make_evidence_request(url)
+            if not resp:
+                # If HTTPS fails, try HTTP
+                if url.startswith("https"):
+                    url = url.replace("https", "http")
+                    resp, req_dump, res_dump, poc = make_evidence_request(url)
+            
+            if not resp:
+                return findings
 
-        self.log(scan, "Auditing security headers...")
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            
+            # 1. Standard Checks
+            for check in HEADER_CHECKS:
+                h_key = check["header"].lower()
+                if h_key not in headers:
+                    findings.append(FindingData(
+                        title=check["title"],
+                        description=check["description"],
+                        severity=check["severity"],
+                        evidence={"url": url, "missing_header": check["header"]},
+                        remediation=check["remediation"],
+                        cvss_score=check.get("cvss_score"),
+                        plugin_slug=self.slug,
+                        request=req_dump,
+                        response=res_dump,
+                        poc=poc
+                    ))
 
-        # Check each expected header
-        for check in HEADER_CHECKS:
-            header_key = check["header"].lower()
-            if header_key not in headers:
-                self.log(scan, f"MISSING: {check['header']} ({check['severity']})")
+            # 2. CORS Check
+            cors_origin = headers.get("access-control-allow-origin")
+            if cors_origin == "*":
                 findings.append(FindingData(
+                    title="Permissive CORS Policy (Wildcard)",
+                    description="The server allows any origin to access its resources (*). This can lead to sensitive data theft via CSRF-like attacks.",
+                    severity=Severity.HIGH,
+                    evidence={"header": "Access-Control-Allow-Origin", "value": "*"},
+                    remediation="Replace '*' with specific trusted domains.",
+                    cvss_score=7.1,
                     plugin_slug=self.slug,
-                    severity=check["severity"],
-                    title=check["title"],
-                    description=check["description"],
-                    remediation=check["remediation"],
-                    cvss_score=check.get("cvss_score"),
-                    evidence={"url": url, "missing_header": check["header"]},
+                    request=req_dump,
+                    response=res_dump,
+                    poc=f"curl -I -H 'Origin: https://evil.com' {url}"
                 ))
-            else:
-                self.log(scan, f"PRESENT: {check['header']}")
 
-        # Server header leakage
-        if "server" in headers:
-            self.log(scan, f"LEAK: Server header found: {headers['server']}")
-            findings.append(FindingData(
-                plugin_slug=self.slug,
-                severity="low",
-                title="Server version disclosure via Server header",
-                description=f"The Server header reveals: {headers['server']}. "
-                             "This information aids attackers in fingerprinting the stack.",
-                remediation="Configure the server to return a generic or no Server header.",
-                evidence={"url": url, "server_header": headers["server"]},
-            ))
+            # 3. Cookie Checks
+            set_cookies = resp.headers.get("Set-Cookie", "")
+            if set_cookies:
+                cookies = [c.strip() for c in set_cookies.split(",")]
+                for cookie in cookies:
+                    issues = []
+                    if "secure" not in cookie.lower() and url.startswith("https"):
+                        issues.append("Secure flag missing")
+                    if "httponly" not in cookie.lower():
+                        issues.append("HttpOnly flag missing")
+                    
+                    if issues:
+                        findings.append(FindingData(
+                            title=f"Insecure Cookie Configuration: {cookie.split('=')[0]}",
+                            description=f"Cookie '{cookie.split('=')[0]}' is missing security flags: {', '.join(issues)}.",
+                            severity=Severity.MEDIUM,
+                            evidence={"cookie": cookie, "issues": issues},
+                            remediation="Add 'Secure' and 'HttpOnly' flags to all sensitive cookies.",
+                            cvss_score=5.0,
+                            plugin_slug=self.slug,
+                            request=req_dump,
+                            response=res_dump,
+                            poc=poc
+                        ))
 
-        if not findings:
-            self.log(scan, "SUCCESS: No major security header issues found.")
-            findings.append(FindingData(
-                plugin_slug=self.slug,
-                severity="info",
-                title="All expected security headers present",
-                description=f"No missing security headers detected on {url}.",
-                evidence={"url": url},
-            ))
+            # 4. Information Leakage
+            leaky_headers = ["server", "x-powered-by", "x-aspnet-version", "x-generator"]
+            for h in leaky_headers:
+                if h in headers:
+                    findings.append(FindingData(
+                        title=f"Information Disclosure via '{h}' header",
+                        description=f"The server reveals technical stack information: {headers[h]}.",
+                        severity=Severity.LOW,
+                        evidence={"header": h, "value": headers[h]},
+                        remediation=f"Remove or obfuscate the '{h}' header from production responses.",
+                        plugin_slug=self.slug,
+                        request=req_dump,
+                        response=res_dump,
+                        poc=poc
+                    ))
 
-        self.log(scan, "HTTP security headers check completed.")
+        except Exception as e:
+            logger.error("Headers check error: %s", e)
+            self.log(scan, f"Error: {str(e)}")
+
         return findings
 
-    def _handle_error(self, url: str, exc: Exception, findings: list[FindingData]) -> list[FindingData]:
-        findings.append(FindingData(
-            plugin_slug=self.slug,
-            severity="info",
-            title="HTTP Connection Failed",
-            description=f"Could not connect to {url}: {exc}",
-            evidence={"url": url, "error": str(exc)},
-        ))
-        return findings
+    def verify(self, finding) -> bool:
+        """
+        Verify by re-fetching headers and updating evidence.
+        """
+        target_url = finding.evidence.get("url") if isinstance(finding.evidence, dict) else None
+        if not target_url:
+            target_url = finding.scan.target.host
+            if not target_url.startswith("http"):
+                target_url = f"http://{target_url}"
+
+        try:
+            resp, req, res, poc = make_evidence_request(target_url)
+            if not resp:
+                return False
+
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            evidence = finding.evidence
+            is_verified = False
+
+            if "missing_header" in evidence:
+                is_verified = evidence["missing_header"].lower() not in headers
+            
+            elif "cookie" in evidence:
+                set_cookie = resp.headers.get("Set-Cookie", "")
+                is_verified = evidence["cookie"].split("=")[0] in set_cookie
+                
+            elif "header" in evidence:
+                h_name = evidence["header"].lower()
+                is_verified = h_name in headers and headers[h_name] == evidence.get("value")
+            
+            if is_verified:
+                finding.request = req
+                finding.response = res
+                return True
+                
+        except Exception:
+            pass
+        return False
+

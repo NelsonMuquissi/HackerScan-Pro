@@ -435,17 +435,23 @@ class BillingService:
     # ─── Quota ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def check_quota(workspace, action: str) -> tuple[bool, str]:
+    def check_quota(workspace, action: str, user=None) -> tuple[bool, str]:
         """
         Checks whether the workspace can perform the given action.
         Returns (allowed, reason). Never raises — always returns a tuple.
 
         If the workspace has no active subscription, free-plan limits apply
         rather than blocking the user entirely.
+        
+        Admins and SuperAdmins bypass all quota checks.
         """
-        # Superadmin bypass
+        # Admin / Superadmin bypass (global roles)
         from users.models import UserRole  # noqa: PLC0415
-        if workspace.owner.role == UserRole.SUPERADMIN:
+        if user and user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
+            return True, ""
+            
+        # Legacy: also check workspace owner role for compatibility
+        if workspace.owner.role in [UserRole.ADMIN, UserRole.SUPERADMIN]:
             return True, ""
 
         from scans.models import ScanTarget  # noqa: PLC0415 — lazy to avoid circular

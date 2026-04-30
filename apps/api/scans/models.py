@@ -279,6 +279,12 @@ class Finding(UUIDModel, TimestampedModel):
     ai_reasoning = models.TextField(blank=True, null=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
+    # Proof of Concept / Verification
+    request     = models.TextField(blank=True, help_text="The raw HTTP request that triggered the finding")
+    response    = models.TextField(blank=True, help_text="The raw HTTP response received")
+    poc         = models.TextField(blank=True, help_text="Actionable Proof of Concept (e.g. curl command or python script)")
+    is_verified = models.BooleanField(default=False, help_text="Whether the vulnerability has been manually or automatically verified")
+
     class Meta:
         ordering = ["-severity", "-created_at"]
 

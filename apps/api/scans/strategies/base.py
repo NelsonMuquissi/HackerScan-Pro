@@ -31,6 +31,14 @@ class FindingData:
     # Optional metadata (not persisted to Finding model, but useful for logging/reporting)
     category: str = ""
     confidence: int = 0
+    is_false_positive: bool = False
+    ai_reasoning: str = ""
+    
+    # Proof of Concept / Verification
+    request: str = ""
+    response: str = ""
+    poc: str = ""
+    is_verified: bool = False
 
 
     def get_fingerprint(self, target_id: str | UUID) -> str:
@@ -64,6 +72,14 @@ class BaseScanStrategy(ABC):
         Should NOT raise exceptions — catch and return a Finding with severity=critical if needed.
         """
         ...
+
+    def verify(self, finding: "Finding") -> bool:
+        """
+        Re-verify a specific finding. 
+        Returns True if the vulnerability is confirmed to still exist.
+        Subclasses should override this for targeted verification.
+        """
+        return False
 
     def log(self, scan: "Scan", message: str):
         """Log a message to the scan terminal."""
