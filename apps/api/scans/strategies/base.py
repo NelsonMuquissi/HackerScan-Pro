@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncGenerator
 
 if TYPE_CHECKING:
     from scans.models import Scan, ScanTarget
@@ -52,37 +52,85 @@ class BaseScanStrategy(ABC):
     """
     Abstract base class for all scan strategies.
 
-    Subclasses MUST define:
-      - name (str): Human-readable name
-      - slug (str): Machine-readable identifier (matches ScanPlugin.slug)
-      - description (str): What the plugin checks
-
-    Subclasses MUST implement:
-      - run(target, scan) -> list[FindingData]
+    Subclasses SHOULD implement:
+      - run_async(target, scan) -> AsyncGenerator[FindingData, None]
+    
+    Subclasses MAY implement:
+      - verify_async(finding) -> bool
     """
     name:        str = ""
     slug:        str = ""
     description: str = ""
 
-    @abstractmethod
-    def run(self, target: "ScanTarget", scan: "Scan") -> list[FindingData]:
+    async def run_async(self, target: "ScanTarget", scan: "Scan" = None) -> AsyncGenerator[FindingData, None]:
         """
-        Execute the scan strategy against the given target.
-        Must be safe to call multiple times (idempotent at the finding level).
-        Should NOT raise exceptions — catch and return a Finding with severity=critical if needed.
+        Execute the scan strategy asynchronously.
+        By default, it runs the synchronous run() in a thread.
+        Subclasses should override this for native async performance.
+        Yields FindingData objects as they are discovered.
         """
-        ...
+        import asyncio
+        loop = asyncio.get_event_loop()
+        # Fallback: run sync version in a thread
+        findings = await loop.run_in_executor(None, self.run, target, scan)
+        for f in findings:
+            yield f
+
+    def run(self, target: "ScanTarget", scan: "Scan" = None) -> list[FindingData]:
+        """
+        Execute the scan strategy against the given target (Synchronous).
+        By default, it wraps run_async() using nest_asyncio.
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+        
+        findings = []
+        async def _collect():
+            async for f in self.run_async(target, scan):
+                findings.append(f)
+        
+        loop.run_until_complete(_collect())
+        return findings
+
+    async def verify_async(self, finding: "Finding") -> bool:
+        """
+        Re-verify a specific finding asynchronously.
+        Subclasses should override this for targeted verification.
+        """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.verify, finding)
 
     def verify(self, finding: "Finding") -> bool:
         """
-        Re-verify a specific finding. 
-        Returns True if the vulnerability is confirmed to still exist.
-        Subclasses should override this for targeted verification.
+        Re-verify a specific finding synchronously.
+        By default, it wraps verify_async() using nest_asyncio.
         """
-        return False
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+            
+        return loop.run_until_complete(self.verify_async(finding))
 
     def log(self, scan: "Scan", message: str):
         """Log a message to the scan terminal."""
+        if not scan:
+            return
         from scans.services import broadcast_terminal_line
         broadcast_terminal_line(scan, f"[{self.slug}] {message}\r\n")
 

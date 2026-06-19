@@ -1,356 +1,254 @@
+{% load report_tags %}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Technical Audit Report | HackerScan Pro</title>
+    <title>Technical Security Audit | HackerScan Pro</title>
+    <link rel="stylesheet" href="report.css">
     <style>
-        :root {
-            --primary: #00ff00;
-            --background: #050505;
-            --surface: #0a0a0a;
-            --card: #111111;
-            --border: rgba(255, 255, 255, 0.05);
-            --text: #e2e8f0;
-            --text-muted: #64748b;
-            --critical: #ef4444;
-            --high: #f97316;
-            --medium: #eab308;
-            --low: #3b82f6;
-            --info: #10b981;
-        }
-
-        @page {
-            size: A4;
-            margin: 0;
-            background: #050505;
-        }
-
-        @page :left {
-            @bottom-left {
-                content: "HackerScan Pro - Technical Intelligence Report";
-                color: #444;
-                font-size: 7pt;
-                padding-left: 60px;
-            }
-        }
-
-        @page :right {
-            @bottom-right {
-                content: "Page " counter(page);
-                color: #444;
-                font-size: 7pt;
-                padding-right: 60px;
-            }
-        }
-
-        body {
-            background-color: #050505;
-            color: var(--text);
-            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
-            line-height: 1.5;
-            margin: 0;
-            padding: 0;
-            word-wrap: break-word;
-            overflow-wrap: anywhere;
-        }
-
-        .page {
-            width: 210mm;
-            height: 297mm;
-            position: relative;
-            page-break-after: always;
-            overflow: hidden;
-        }
-
-        /* ── COVER PAGE ──────────────────────────────────────────────────────── */
+        /* Technical-specific overrides */
         .cover-page {
-            background: radial-gradient(circle at top right, rgba(0, 255, 0, 0.08) 0%, transparent 50%),
-                        radial-gradient(circle at bottom left, rgba(0, 255, 0, 0.05) 0%, transparent 40%);
-            border-bottom: 5px solid var(--primary);
+            background: linear-gradient(135deg, #050505 0%, #0a0a0a 100%);
+            border-bottom: 10pt solid var(--primary);
+            height: 297mm;
+            box-sizing: border-box;
         }
 
-        .cover-content {
-            padding: 100px 80px;
-            height: 100%;
-            position: relative;
-        }
-
-        .cover-logo {
-            width: 140px;
-            margin-bottom: 60px;
-        }
-
-        .cover-title {
-            font-size: 56px;
-            font-weight: 900;
-            color: #ffffff;
-            margin: 0;
-            text-transform: uppercase;
-            letter-spacing: -2px;
-            line-height: 0.9;
-        }
-
-        .cover-subtitle {
-            font-size: 24px;
-            color: var(--primary);
-            margin: 20px 0 0 0;
-            font-weight: 300;
-            text-transform: uppercase;
-            letter-spacing: 5px;
-        }
-
-        .cover-details {
-            position: absolute;
-            bottom: 100px;
-            left: 80px;
-        }
-
-        .detail-row {
-            margin-bottom: 25px;
-        }
-
-        .detail-label {
-            font-size: 10px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            display: block;
-            margin-bottom: 5px;
-        }
-
-        .detail-value {
-            font-size: 16px;
-            color: #ffffff;
-            font-weight: 600;
-        }
-
-        /* ── INNER PAGES ─────────────────────────────────────────────────────── */
-        .content-page {
-            padding: 50px 70px;
-        }
-
-        .header-accent {
+        .cover-overlay {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
-            height: 3px;
-            background: linear-gradient(to right, var(--primary), transparent);
+            height: 100%;
+            background-image: radial-gradient(var(--primary-dim) 1pt, transparent 1pt);
+            background-size: 20pt 20pt;
+            opacity: 0.3;
         }
 
-        h2 {
-            font-size: 12px;
-            color: var(--primary);
-            text-transform: uppercase;
-            letter-spacing: 3px;
-            margin-bottom: 30px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 10px;
-        }
-
-        /* ── SUMMARY ─────────────────────────────────────────────────────────── */
-        .summary-grid {
-            display: table;
-            width: 100%;
-            border-spacing: 12px;
-            margin: 0 -12px 40px -12px;
-        }
-
-        .summary-stat {
-            display: table-cell;
-            background: #0d0d0d;
-            border: 1px solid var(--border);
-            padding: 25px;
-            border-radius: 16px;
-            text-align: center;
-        }
-
-        .stat-val {
-            display: block;
-            font-size: 36px;
-            font-weight: 900;
-            line-height: 1;
-            margin-bottom: 5px;
-        }
-
-        .stat-lab {
-            font-size: 9px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        /* ── FINDINGS ────────────────────────────────────────────────────────── */
-        .finding-card {
-            background: #0d0d0d;
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 30px;
-            margin-bottom: 40px;
-            page-break-inside: avoid;
+        .cover-content {
+            padding: 100pt 60pt;
             position: relative;
+            z-index: 10;
         }
 
-        .severity-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 10px;
+        .cover-title {
+            font-size: 56pt;
             font-weight: 900;
-            text-transform: uppercase;
-            margin-bottom: 15px;
-        }
-
-        .finding-title {
-            font-size: 22px;
-            font-weight: 800;
             color: #ffffff;
-            margin: 0 0 15px 0;
-        }
-
-        .finding-desc {
-            font-size: 14px;
-            color: var(--text-muted);
-            margin-bottom: 25px;
-            line-height: 1.7;
-        }
-
-        .ai-insight {
-            background: rgba(0, 255, 0, 0.03);
-            border: 1px solid rgba(0, 255, 0, 0.1);
-            padding: 20px;
-            border-radius: 12px;
-            margin: 20px 0;
-        }
-
-        .ai-tag {
-            color: var(--primary);
-            font-size: 9px;
-            font-weight: 900;
+            margin: 0;
+            line-height: 0.85;
+            letter-spacing: -2pt;
             text-transform: uppercase;
-            margin-bottom: 8px;
-            display: block;
         }
 
-        .code-box {
-            background: #000000;
-            border: 1px solid #222;
-            color: #00ff00;
-            font-family: 'Courier New', monospace;
-            padding: 20px;
-            border-radius: 10px;
-            font-size: 12px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: anywhere;
-            margin: 20px 0;
-            border-left: 3px solid var(--primary);
+        .cover-subtitle {
+            font-size: 16pt;
+            color: var(--primary);
+            margin: 20pt 0 0 0;
+            text-transform: uppercase;
+            letter-spacing: 5pt;
         }
 
-        /* ── UTILS ──────────────────────────────────────────────────────────── */
-        .bg-critical { background: var(--critical); color: #fff; }
-        .bg-high     { background: var(--high);     color: #fff; }
-        .bg-medium   { background: var(--medium);   color: #000; }
-        .bg-low      { background: var(--low);      color: #fff; }
-        .bg-info     { background: var(--info);     color: #fff; }
+        .cover-footer {
+            position: absolute;
+            bottom: 60pt;
+            left: 60pt;
+            right: 60pt;
+        }
 
-        .text-critical { color: var(--critical); }
-        .text-high     { color: var(--high); }
-        .text-medium   { color: var(--medium); }
+        .finding-entry {
+            margin-bottom: 30pt;
+            page-break-inside: avoid;
+        }
 
+        .verified-tag {
+            background: rgba(0, 255, 0, 0.1);
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            padding: 2pt 6pt;
+            font-size: 7pt;
+            font-weight: 900;
+            border-radius: 3pt;
+            margin-left: 8pt;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
-    <!-- COVER PAGE -->
-    <div class="page cover-page">
+    <!-- PAGE 1: COVER -->
+    <div class="page page-cover cover-page">
+        <div class="cover-overlay"></div>
         <div class="cover-content">
-            <img src="logo.png" class="cover-logo" alt="">
+            <img src="logo.png" style="width: 140pt; margin-bottom: 50pt;">
             <h1 class="cover-title">TECHNICAL<br>AUDIT REPORT</h1>
-            <p class="cover-subtitle">Cybersecurity Intelligence</p>
+            <p class="cover-subtitle">Cyber Intelligence Intelligence</p>
             
-            <div class="cover-details">
-                <div class="detail-row">
-                    <span class="detail-label">Target Infrastructure</span>
-                    <span class="detail-value">{{ scan.target.host|upper }}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Scan Strategy</span>
-                    <span class="detail-value">{{ scan.scan_type|upper }} MODULE</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Execution ID</span>
-                    <span class="detail-value">HSP-{{ scan.id|upper }}</span>
+            <div class="cover-footer">
+                <table style="width: 100%; border-top: 1px solid var(--border); padding-top: 20pt;">
+                    <tr>
+                        <td>
+                            <div style="font-size: 7pt; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2pt; margin-bottom: 4pt;">Target Infrastructure</div>
+                            <div style="font-size: 16pt; color: #ffffff; font-weight: 700;">{{ scan.target|upper }}</div>
+                        </td>
+                        <td style="text-align: right;">
+                            <div style="font-size: 7pt; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2pt; margin-bottom: 4pt;">Internal Identifier</div>
+                            <div style="font-size: 16pt; color: #ffffff; font-weight: 700;">HSP-{{ scan.id|slice:":8"|upper }}</div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 2: SUMMARY -->
+    <div class="page page-content">
+        <div class="section">
+            <span class="section-label">Executive Overview</span>
+            <h2>Vulnerability Matrix</h2>
+            
+            <table class="stat-table">
+                <tr>
+                    <td class="stat-cell">
+                        <span class="stat-value" style="color: var(--critical);">{{ scan.critical_count }}</span>
+                        <span class="stat-label">Critical</span>
+                    </td>
+                    <td class="stat-cell">
+                        <span class="stat-value" style="color: var(--high);">{{ scan.high_count }}</span>
+                        <span class="stat-label">High</span>
+                    </td>
+                    <td class="stat-cell">
+                        <span class="stat-value" style="color: var(--medium);">{{ scan.medium_count }}</span>
+                        <span class="stat-label">Medium</span>
+                    </td>
+                    <td class="stat-cell">
+                        <span class="stat-value" style="color: #fff;">{{ scan.findings|length }}</span>
+                        <span class="stat-label">Total</span>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <span class="section-label">Predictive Analysis</span>
+            <div class="ai-note-box" style="background: rgba(0, 255, 0, 0.02);">
+                <div class="ai-tag-label">Neural Attack Path Analysis</div>
+                <div style="line-height: 1.8; color: #cbd5e1; font-size: 11pt;" class="markdown-content">
+                    {{ scan.ai_prediction|markdown }}
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- MAIN CONTENT -->
-    <div class="page content-page">
-        <div class="header-accent"></div>
-        
+    <!-- PAGE 3+: FINDINGS -->
+    <div class="page page-content">
         <div class="section">
-            <h2>Vulnerability Statistics</h2>
-            <div class="summary-grid">
-                <div class="summary-stat">
-                    <span class="stat-val text-critical">{{ scan.critical_count }}</span>
-                    <span class="stat-lab">Critical</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="stat-val text-high">{{ scan.high_count }}</span>
-                    <span class="stat-lab">High</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="stat-val text-medium">{{ scan.medium_count }}</span>
-                    <span class="stat-lab">Medium</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="stat-val" style="color: #fff;">{{ scan.findings|length }}</span>
-                    <span class="stat-lab">Total Detected</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Neural Attack Path Analysis</h2>
-            <div style="background: var(--surface); border: 1px solid var(--border); padding: 35px; border-radius: 20px; margin-bottom: 50px;">
-                <div style="color: var(--primary); font-size: 10px; font-weight: 900; margin-bottom: 15px;">🤖 AI PREDICTIVE VECTOR</div>
-                <div style="font-size: 14px; line-height: 1.8; color: #cbd5e1;">
-                    {{ scan.ai_prediction|linebreaksbr }}
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Detailed Vulnerability Registry</h2>
+            <span class="section-label">Detailed Finding Registry</span>
+            
             {% for finding in scan.findings %}
-            <div class="finding-card">
-                <span class="severity-badge bg-{{ finding.severity|lower }}">{{ finding.severity }}</span>
-                <h3 class="finding-title">{{ finding.title }}</h3>
+            <div class="glass-card finding-entry" style="position: relative;">
+                <div class="hud-corner hud-tl"></div>
+                <div class="hud-corner hud-tr"></div>
                 
-                <div class="finding-desc">
-                    {{ finding.description }}
-                </div>
+                <div style="margin-bottom: 15pt; border-bottom: 1px solid var(--border); padding-bottom: 10pt;">
+                    <span class="severity-badge bg-{{ finding.severity|lower }}">{{ finding.severity }}</span>
+                    {% if finding.is_verified %}
+                    <span class="verified-tag">✓ ZERO SIMULATION VERIFIED</span>
+                    {% endif %}
+                    <div style="font-size: 7pt; color: var(--text-muted); float: right; margin-top: 4pt;">
+                        ID: {{ finding.id|slice:":8"|upper }}
+                    </div>
+                    <h3 class="finding-title">{{ finding.title }}</h3>
 
-                <div class="ai-insight">
-                    <span class="ai-tag">🤖 HackerScan AI Insight</span>
-                    <div style="font-size: 13px; color: #e2e8f0; line-height: 1.6;">{{ finding.ai_explanation|linebreaksbr }}</div>
+                    <!-- Compliance Mapping -->
+                    <div style="margin-top: 8pt; display: flex; gap: 8pt;">
+                        {% if finding.compliance.owasp %}
+                        <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--border); padding: 2pt 6pt; border-radius: 2pt; display: inline-block;">
+                            <span style="font-size: 5pt; color: var(--primary); display: block; text-transform: uppercase; line-height: 1;">OWASP</span>
+                            <span style="font-size: 7pt; color: #fff; font-weight: 600;">{{ finding.compliance.owasp }}</span>
+                        </div>
+                        {% endif %}
+                        {% if finding.compliance.mitre %}
+                        <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--border); padding: 2pt 6pt; border-radius: 2pt; display: inline-block;">
+                            <span style="font-size: 5pt; color: var(--info); display: block; text-transform: uppercase; line-height: 1;">MITRE</span>
+                            <span style="font-size: 7pt; color: #fff; font-weight: 600;">{{ finding.compliance.mitre }}</span>
+                        </div>
+                        {% endif %}
+                        {% if finding.compliance.cwe %}
+                        <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--border); padding: 2pt 6pt; border-radius: 2pt; display: inline-block;">
+                            <span style="font-size: 5pt; color: #ff8800; display: block; text-transform: uppercase; line-height: 1;">CWE</span>
+                            <span style="font-size: 7pt; color: #fff; font-weight: 600;">{{ finding.compliance.cwe }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
+                
+                <div class="finding-main">
+                    <div class="markdown-content" style="font-size: 11pt; color: var(--text-muted); margin-bottom: 20pt;">
+                        {{ finding.description|markdown }}
+                    </div>
 
-                {% if finding.payload %}
-                <div style="margin: 25px 0;">
-                    <span class="detail-label">Technical Evidence / POC</span>
-                    <div class="code-box">{{ finding.payload }}</div>
-                </div>
-                {% endif %}
+                    <div class="ai-note-box">
+                        <div class="ai-tag-label">AI Diagnostic Reasoning</div>
+                        <div style="color: #e2e8f0; font-size: 10pt;" class="markdown-content">
+                            {{ finding.ai_explanation|markdown }}
+                        </div>
+                    </div>
 
-                <div style="margin-top: 30px; padding-top: 25px; border-top: 1px solid var(--border);">
-                    <span class="ai-tag">🛠️ Remediation Directive</span>
-                    <div style="font-size: 13px; line-height: 1.6;">{{ finding.ai_remediation|linebreaksbr }}</div>
+                    <!-- EVIDENCE -->
+                    {% if finding.screenshot %}
+                    <div style="margin-top: 20pt;">
+                        <span class="section-label" style="font-size: 7pt; margin-bottom: 8pt;">Visual Proof (Master Capture)</span>
+                        <div style="border: 1px solid var(--border); border-radius: 4pt; overflow: hidden; background: #000; position: relative;">
+                            <img src="data:image/jpeg;base64,{{ finding.screenshot }}" style="width: 100%; display: block;">
+                            <div style="position: absolute; bottom: 0; right: 0; background: var(--primary); color: #000; font-size: 6pt; padding: 2pt 6pt; font-weight: 900; text-transform: uppercase; letter-spacing: 1pt;">
+                                HSCAN-TACTICAL-ARCHIVE // {{ finding.id|slice:":8"|upper }}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if finding.poc or finding.request or finding.response %}
+                    <div style="margin-top: 20pt;">
+                        <span class="section-label" style="font-size: 7pt; margin-bottom: 8pt;">Technical Evidence</span>
+                        
+                        {% if finding.poc %}
+                        <div style="margin-bottom: 12pt;">
+                            <div style="font-size: 8pt; color: var(--primary); margin-bottom: 4pt;">Exploitation Command</div>
+                            <div class="code-block">{{ finding.poc }}</div>
+                        </div>
+                        {% endif %}
+
+                        {% if finding.request %}
+                        <div style="margin-bottom: 12pt;">
+                            <div style="font-size: 8pt; color: var(--primary); margin-bottom: 4pt;">HTTP Request</div>
+                            <div class="code-block">{{ finding.request }}</div>
+                        </div>
+                        {% endif %}
+
+                        {% if finding.response %}
+                        <div style="margin-bottom: 12pt;">
+                            <div style="font-size: 8pt; color: var(--info); margin-bottom: 4pt;">HTTP Response</div>
+                            <div class="code-block" style="border-left-color: var(--info); color: #88ff88;">{{ finding.response }}</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    <div style="margin-top: 25pt; padding-top: 15pt; border-top: 1px solid var(--border);">
+                        <span style="font-size: 8pt; color: var(--primary); font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8pt;">Remediation Directive</span>
+                        <div style="font-size: 10pt; line-height: 1.6;" class="markdown-content">
+                            {{ finding.ai_remediation|markdown }}
+                        </div>
+                    </div>
                 </div>
             </div>
             {% endfor %}
         </div>
+    </div>
+    <!-- INTEGRITY FOOTER -->
+    <div style="position: fixed; bottom: 20pt; left: 60pt; right: 60pt; font-size: 6pt; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1pt; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 5pt;">
+        HackerScan Pro Integrity Hash: {{ scan.id|slice:":8"|upper }}-CONFIRMED // SIGNATURE: {{ scan.id|slice:":12" }}...
+        <span style="float: right;">Verification Portal: scan.hackerscan.pro/verify</span>
     </div>
 </body>
 </html>

@@ -14,11 +14,16 @@ import {
   Copy,
   ChevronLeft,
   Loader2,
-  Lock
+  Lock,
+  Camera,
+  Upload,
+  Zap
 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getBountyProgram, submitFinding } from '@/lib/api';
+import { suggestCompliance } from '@/lib/compliance';
+import { cn } from '@/lib/utils';
 
 export default function BountyDetailPage() {
   const { id } = useParams();
@@ -33,8 +38,17 @@ export default function BountyDetailPage() {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    severity: 'MEDIUM'
+    severity: 'MEDIUM',
+    target_domain: '',
+    visual_proof_b64: '' as string | null,
+    technical_details: {} as any,
+    compliance_mapping: {
+      owasp: '',
+      mitre: ''
+    }
   });
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonRaw, setJsonRaw] = useState('');
 
   useEffect(() => {
     if (id) loadProgram();
@@ -51,8 +65,34 @@ export default function BountyDetailPage() {
     }
   }
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        // Remove data:image/png;base64, prefix if present
+        const pureBase64 = base64String.split(',')[1] || base64String;
+        setFormData(prev => ({ ...prev, visual_proof_b64: pureBase64 }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    
+    // Final JSON Validation
+    if (jsonRaw) {
+      try {
+        const parsed = JSON.parse(jsonRaw);
+        setFormData(prev => ({ ...prev, technical_details: parsed }));
+      } catch (err) {
+        setJsonError('JSON Inválido: Certifique-se de que o formato está correto.');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const result = await submitFinding({
@@ -67,6 +107,21 @@ export default function BountyDetailPage() {
       setSubmitting(false);
     }
   }
+
+  // Auto-suggest compliance mapping
+  useEffect(() => {
+    const suggestion = suggestCompliance(formData.title, formData.description);
+
+    if (suggestion && !formData.compliance_mapping.owasp) {
+      setFormData(prev => ({
+        ...prev,
+        compliance_mapping: {
+          owasp: suggestion.owasp,
+          mitre: suggestion.mitre
+        }
+      }));
+    }
+  }, [formData.title, formData.description]);
 
   if (loading) {
     return (
@@ -186,30 +241,151 @@ export default function BountyDetailPage() {
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-zinc-500 text-xs font-bold uppercase">Severidade Estimada</label>
-                    <select 
-                      className="w-full bg-black border border-zinc-800 rounded-xl py-3 px-4 focus:border-emerald-500 outline-none appearance-none"
-                      value={formData.severity}
-                      onChange={e => setFormData({...formData, severity: e.target.value})}
-                    >
-                      <option value="CRITICAL">Critical (9.0 - 10.0)</option>
-                      <option value="HIGH">High (7.0 - 8.9)</option>
-                      <option value="MEDIUM">Medium (4.0 - 6.9)</option>
-                      <option value="LOW">Low (0.1 - 3.9)</option>
-                    </select>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-zinc-500 text-xs font-bold uppercase">Domínio do Alvo</label>
+                      <input 
+                        required
+                        placeholder="Ex: sub.target.com"
+                        className="w-full bg-black border border-zinc-800 rounded-xl py-3 px-4 focus:border-emerald-500 outline-none"
+                        value={formData.target_domain}
+                        onChange={e => setFormData({...formData, target_domain: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-zinc-500 text-xs font-bold uppercase">Severidade Estimada</label>
+                      <select 
+                        className="w-full bg-black border border-zinc-800 rounded-xl py-3 px-4 focus:border-emerald-500 outline-none appearance-none"
+                        value={formData.severity}
+                        onChange={e => setFormData({...formData, severity: e.target.value})}
+                      >
+                        <option value="CRITICAL">Critical (9.0 - 10.0)</option>
+                        <option value="HIGH">High (7.0 - 8.9)</option>
+                        <option value="MEDIUM">Medium (4.0 - 6.9)</option>
+                        <option value="LOW">Low (0.1 - 3.9)</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
                     <label className="text-zinc-500 text-xs font-bold uppercase">Descrição Técnica (PoC)</label>
                     <textarea 
                       required
-                      rows={6}
+                      rows={4}
                       placeholder="Descreva os passos para reproduzir, impacto e sugestão de correção..."
                       className="w-full bg-black border border-zinc-800 rounded-xl py-4 px-4 focus:border-emerald-500 outline-none font-mono text-sm"
                       value={formData.description}
                       onChange={e => setFormData({...formData, description: e.target.value})}
                     />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-zinc-500 text-xs font-bold uppercase flex items-center gap-2">
+                        <Camera className="w-3 h-3" /> Prova Visual (Screenshot)
+                      </label>
+                      <div className="relative group/upload">
+                        <input 
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        />
+                        <div className={cn(
+                          "w-full border-2 border-dashed rounded-xl py-8 flex flex-col items-center justify-center transition-all",
+                          formData.visual_proof_b64 
+                            ? "border-emerald-500/50 bg-emerald-500/5" 
+                            : "border-zinc-800 bg-black hover:border-zinc-700"
+                        )}>
+                          {formData.visual_proof_b64 ? (
+                            <div className="flex flex-col items-center gap-2">
+                              <CheckCircle className="w-8 h-8 text-emerald-500" />
+                              <span className="text-[10px] font-mono text-emerald-400 font-bold">IMAGEM CARREGADA</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center gap-2 text-zinc-600 group-hover/upload:text-zinc-400 transition-colors">
+                              <Upload className="w-8 h-8" />
+                              <span className="text-[10px] font-mono uppercase tracking-widest">Clique para Upload</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-zinc-500 text-xs font-bold uppercase flex items-center gap-2">
+                        <Zap className={cn("w-3 h-3", jsonError ? "text-red-500" : "text-emerald-500")} /> 
+                        Detalhes Técnicos (JSON)
+                      </label>
+                      <textarea 
+                        rows={5}
+                        placeholder='{"vector": "...", "payload": "..."}'
+                        className={cn(
+                          "w-full h-[104px] bg-black border rounded-xl py-3 px-4 focus:border-emerald-500 outline-none font-mono text-[11px] transition-colors",
+                          jsonError ? "border-red-500/50 text-red-200" : "border-zinc-800 text-zinc-400"
+                        )}
+                        value={jsonRaw}
+                        onChange={e => {
+                          setJsonRaw(e.target.value);
+                          if (!e.target.value) {
+                            setJsonError(null);
+                            setFormData(prev => ({ ...prev, technical_details: {} }));
+                            return;
+                          }
+                          try {
+                            const json = JSON.parse(e.target.value);
+                            setFormData(prev => ({...prev, technical_details: json}));
+                            setJsonError(null);
+                          } catch (err) {
+                            setJsonError('Invalid JSON');
+                          }
+                        }}
+                      />
+                      {jsonError && <p className="text-[10px] text-red-500 font-mono mt-1">{jsonError}</p>}
+                    </div>
+                  </div>
+
+                  {/* Compliance Mapping Section */}
+                  <div className="bg-black/40 border border-zinc-800 rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-zinc-500 text-xs font-bold uppercase flex items-center gap-2">
+                        <Shield className="w-3 h-3 text-emerald-500" /> 
+                        Mapeamento de Compliance (Audit-Ready)
+                      </label>
+                      <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest">
+                        Sugestão Inteligente Ativa
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-zinc-600 text-[10px] uppercase font-bold">OWASP Top 10</label>
+                        <input 
+                          placeholder="Ex: A03:2021-Injection"
+                          className="w-full bg-black/60 border border-zinc-800 rounded-xl py-2 px-3 focus:border-emerald-500 outline-none text-sm font-mono text-emerald-200"
+                          value={formData.compliance_mapping.owasp}
+                          onChange={e => setFormData({
+                            ...formData, 
+                            compliance_mapping: { ...formData.compliance_mapping, owasp: e.target.value }
+                          })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-zinc-600 text-[10px] uppercase font-bold">MITRE ATT&CK / CWE</label>
+                        <input 
+                          placeholder="Ex: CWE-79"
+                          className="w-full bg-black/60 border border-zinc-800 rounded-xl py-2 px-3 focus:border-emerald-500 outline-none text-sm font-mono text-emerald-200"
+                          value={formData.compliance_mapping.mitre}
+                          onChange={e => setFormData({
+                            ...formData, 
+                            compliance_mapping: { ...formData.compliance_mapping, mitre: e.target.value }
+                          })}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-zinc-500 italic">
+                      Este mapeamento será utilizado para gerar evidências imutáveis no Evidence Vault.
+                    </p>
                   </div>
 
                   <button 

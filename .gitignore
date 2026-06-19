@@ -31,3 +31,14 @@ artifacts/
 *.md_bak
 makemigrations_error.txt
 makemigrations_verbose.txt
+
+# Temporary and scratch files
+scratch/
+*/scratch/
+*output*.txt
+debug_*.txt
+test_*.txt
+*.pdf
+wallets_full.txt
+showmigrations.txt
+pytest_*.txt

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Zap, 
   BrainCircuit, 
@@ -27,7 +27,7 @@ export function AIAnalysisSection({ scanId }: AIAnalysisSectionProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [creditError, setCreditError] = useState<any>(null);
 
-  async function loadPrediction(force = false) {
+  const loadPrediction = useCallback(async (force = false) => {
     if (loading) return;
     setLoading(true);
     setError(null);
@@ -45,13 +45,13 @@ export function AIAnalysisSection({ scanId }: AIAnalysisSectionProps) {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }
+  }, [scanId, loading]);
 
   useEffect(() => {
     // We don't auto-load to save tokens unless the user clicks or we want to auto-load on first view
     // Let's auto-load once per scan detail view
     loadPrediction();
-  }, [scanId]);
+  }, [scanId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="bg-[#050505] border border-neon-green/20 rounded-xl overflow-hidden shadow-[0_0_50px_-12px_rgba(57,255,20,0.1)]">

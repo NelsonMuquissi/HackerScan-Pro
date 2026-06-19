@@ -284,7 +284,11 @@ class AuditLog(UUIDModel):
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True, default="")
     metadata = models.JSONField(default=dict)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    # Integrity Chain (Nexus Protocol v1.4.2)
+    previous_hash = models.CharField(max_length=64, null=True, blank=True)
+    current_hash = models.CharField(max_length=64, db_index=True, null=True, blank=True)
 
     class Meta:
         db_table = "audit_logs"
@@ -292,11 +296,63 @@ class AuditLog(UUIDModel):
             models.Index(fields=["workspace", "-created_at"], name="idx_audit_ws_created"),
             models.Index(fields=["user", "-created_at"], name="idx_audit_user_created"),
             models.Index(fields=["resource_type", "resource_id"], name="idx_audit_resource"),
+            models.Index(fields=["action", "-created_at"], name="idx_audit_action_created"),
+            models.Index(fields=["current_hash"], name="idx_audit_hash"),
         ]
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
         return f"{self.action} by {self.user_id} in {self.workspace_id} at {self.created_at}"
+
+    def calculate_hash(self) -> str:
+        """
+        Calculates a SHA-256 hash of the log entry to ensure immutability.
+        Included fields: ID, CreatedAt, Action, ResourceID, PreviousHash.
+        """
+        payload = (
+            f"{self.id}|"
+            f"{self.created_at.isoformat() if self.created_at else ''}|"
+            f"{self.action}|"
+            f"{self.resource_id or ''}|"
+            f"{self.previous_hash or ''}"
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def verify_integrity(self) -> bool:
+        """Checks if the current hash matches the calculated hash."""
+        return self.current_hash == self.calculate_hash()
+
+    def verify_chain_link(self) -> bool:
+        """Checks if this log correctly links to the previous one in sequence."""
+        if not self.previous_hash:
+            return True
+            
+        # Find the log that immediately precedes this one in the chain
+        # Using both created_at and id for deterministic sequence
+        last_log = AuditLog.objects.filter(
+            models.Q(created_at__lt=self.created_at) | 
+            models.Q(created_at=self.created_at, id__lt=self.id)
+        ).order_by('-created_at', '-id').first()
+        
+        if not last_log:
+            # If no predecessor, must be genesis or have legacy hash
+            return self.previous_hash == "0" * 64
+            
+        return self.previous_hash == last_log.current_hash
+
+    def save(self, *args, **kwargs):
+        if not self.current_hash:
+            # Atomic selection of the last log to prevent race conditions in high-concurrency
+            # Note: In a real distributed system, we might use a dedicated sequence service or blockchain.
+            last_log = AuditLog.objects.exclude(current_hash__isnull=True).order_by('-created_at', '-id').first()
+            self.previous_hash = last_log.current_hash if last_log else "0" * 64
+            
+            if not self.created_at:
+                self.created_at = timezone.now()
+            
+            self.current_hash = self.calculate_hash()
+            
+        super().save(*args, **kwargs)
 
     @classmethod
     def log(

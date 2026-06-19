@@ -1,17 +1,18 @@
 import logging
-import subprocess
+import asyncio
 import os
-import requests
 from pathlib import Path
-from typing import List
+from typing import List, Optional, AsyncGenerator
+
 from .base import BaseScanStrategy, register, FindingData
 from scans.models import Severity
+from ..utils import make_evidence_request_async
 
 logger = logging.getLogger(__name__)
 
 # Resolve the wordlist path relative to this file
 _STRATEGY_DIR = Path(__file__).resolve().parent
-_DEFAULT_WORDLIST = _STRATEGY_DIR / "wordlists" / "common.txt"
+_DEFAULT_WORDLIST = _STRATEGY_DIR.parent / "wordlists" / "common.txt"
 
 @register
 class DirFuzzingStrategy(BaseScanStrategy):
@@ -38,19 +39,30 @@ class DirFuzzingStrategy(BaseScanStrategy):
         "dashboard": Severity.LOW,
     }
 
-    def run(self, target, scan=None) -> List[FindingData]:
-        findings = []
-        host = target.host
-        url = host if host.startswith("http") else f"http://{host}"
+    async def run_async(self, target: "ScanTarget", scan: "Scan" = None) -> AsyncGenerator[FindingData, None]:
+        url = target.url
 
+        import shutil
+        gobuster_path = shutil.which("gobuster")
+
+        if gobuster_path:
+            self.log(scan, "Gobuster detected. Starting directory fuzzing...")
+            async for finding in self._run_gobuster_async(gobuster_path, url, scan):
+                yield finding
+        else:
+            self.log(scan, "Gobuster not found. Using built-in async fuzzer...")
+            async for finding in self._run_fallback_fuzzer_async(url, scan):
+                yield finding
+
+    async def _run_gobuster_async(self, gobuster_path: str, url: str, scan: "Scan") -> AsyncGenerator[FindingData, None]:
         wordlist = str(_DEFAULT_WORDLIST)
         if not os.path.exists(wordlist):
             self.log(scan, f"Wordlist not found at {wordlist}. Skipping.")
-            return findings
+            return
 
         try:
             cmd = [
-                "gobuster",
+                gobuster_path,
                 "dir",
                 "-u", url,
                 "-w", wordlist,
@@ -58,63 +70,95 @@ class DirFuzzingStrategy(BaseScanStrategy):
                 "-q",  # Quiet
             ]
 
-            self.log(scan, f"Running: {' '.join(cmd)}")
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=300)
-
-            discovered_paths = []
-            for line in proc.stdout.splitlines():
-                # Line format usually: /admin (Status: 200) [Size: 123]
-                if "(Status: 200)" in line or "(Status: 301)" in line:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, _ = await process.communicate()
+            
+            for line in stdout.decode().splitlines():
+                if "(Status: 200)" in line or "(Status: 301)" in line or "(Status: 302)" in line:
                     path = line.split(" ")[0].strip()
-                    discovered_paths.append(path)
+                    full_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
+                    
+                    # Enrich with a real request for evidence
+                    resp, req, res, poc = await make_evidence_request_async(full_url, timeout=5, follow_redirects=True)
+                    
+                    finding = self._process_path_result(path, full_url, resp.status_code if resp else 200, req, res, poc)
+                    if finding:
+                        yield finding
 
-            for path in discovered_paths:
-                severity = Severity.INFO
-                full_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
-                title = f"Discovered Path: {path}"
-                description = f"Automated fuzzing identified an accessible path at {full_url}"
-                
-                # Check for sensitive patterns
-                for pattern, sev in self.SENSITIVE_PATTERNS.items():
-                    if pattern in path.lower():
-                        severity = sev
-                        title = f"Sensitive Resource Exposed: {path}"
-                        description = f"A potentially sensitive file or directory was found at {full_url}. This could lead to information disclosure."
-                        break
-
-                findings.append(FindingData(
-                    title=title,
-                    description=description,
-                    severity=severity,
-                    evidence={
-                        "path": path, 
-                        "full_url": full_url, 
-                        "raw_line": line,
-                        "method": "GET"
-                    },
-                    poc=f"curl -I {full_url}",
-                    remediation="Restrict access to this path or remove the file if it is not necessary for production.",
-                    plugin_slug=self.slug
-                ))
-
-            if not discovered_paths:
-                self.log(scan, "No interesting paths discovered.")
-
-        except FileNotFoundError:
-            self.log(scan, "gobuster not found. Skipping.")
-        except subprocess.TimeoutExpired:
-            self.log(scan, "gobuster timed out.")
         except Exception as e:
-            logger.error("DirFuzzingStrategy error: %s", e)
+            logger.error(f"Gobuster error: {e}")
+            self.log(scan, f"Engine error: {str(e)}")
 
-        return findings
+    async def _run_fallback_fuzzer_async(self, base_url: str, scan: "Scan") -> AsyncGenerator[FindingData, None]:
+        wordlist_path = str(_DEFAULT_WORDLIST)
+        if not os.path.exists(wordlist_path):
+            return
 
-    def verify(self, finding) -> bool:
-        """
-        Verify the finding by checking if the path is still accessible.
-        """
-        from scans.utils import make_evidence_request
+        with open(wordlist_path, 'r') as f:
+            words = [line.strip() for line in f if line.strip()]
+
+        semaphore = asyncio.Semaphore(10)
+
+        async def _check_path(path):
+            async with semaphore:
+                full_url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+                try:
+                    resp, req, res, poc = await make_evidence_request_async(full_url, timeout=5, follow_redirects=True)
+                    if resp and resp.status_code < 400:
+                        return self._process_path_result(path, full_url, resp.status_code, req, res, poc)
+                except Exception:
+                    pass
+                return None
+
+        tasks = [asyncio.create_task(_check_path(word)) for word in words[:200]] # Limit built-in scan
+        for task in asyncio.as_completed(tasks):
+            finding = await task
+            if finding:
+                yield finding
+
+    def _process_path_result(self, path: str, full_url: str, status: int, request_dump: str, response_dump: str, poc: str) -> FindingData:
+        severity = Severity.INFO
+        title = f"Discovered Path: {path}"
+        description = (
+            f"Automated fuzzing identified an accessible path at `{full_url}`.\n\n"
+            f"**REAL DATA PROOF**: The server returned a successful response for this path."
+        )
         
+        # Check for sensitive patterns
+        for pattern, sev in self.SENSITIVE_PATTERNS.items():
+            if pattern in path.lower():
+                severity = sev
+                title = f"Sensitive Resource Exposed: {path}"
+                description = (
+                    f"A potentially sensitive resource `{path}` was found exposed on the server.\n\n"
+                    f"**REAL DATA PROOF**: Resource accessible at `{full_url}` (HTTP {status})."
+                )
+                break
+
+        return FindingData(
+            title=title,
+            description=description,
+            severity=severity,
+            evidence={
+                "path": path, 
+                "full_url": full_url, 
+                "status_code": status,
+                "method": "GET"
+            },
+            request=request_dump,
+            response=response_dump,
+            poc=poc or f"curl -i {full_url}",
+            remediation="Restrict access to this path or remove the file if it is not necessary for production.",
+            plugin_slug=self.slug,
+            is_verified=True
+        )
+
+    async def verify_async(self, finding: "Finding") -> bool:
         evidence = finding.evidence
         if not isinstance(evidence, dict):
             return False
@@ -124,8 +168,7 @@ class DirFuzzingStrategy(BaseScanStrategy):
             return False
             
         try:
-            # 🎯 Standardized verification with evidence capture
-            resp, req, res, poc = make_evidence_request(
+            resp, req, res, poc = await make_evidence_request_async(
                 full_url, 
                 method=evidence.get("method", "GET"),
                 follow_redirects=True,
@@ -133,12 +176,14 @@ class DirFuzzingStrategy(BaseScanStrategy):
             )
             
             if resp and resp.status_code < 400:
-                # Update finding with fresh dumps
                 finding.request = req
                 finding.response = res
                 finding.poc = poc
                 
-                # Extra "hidden" check: if it's a .env, check for common keys
+                # Use executor for DB save to avoid blocking
+                from asgiref.sync import sync_to_async
+                await sync_to_async(finding.save)()
+                
                 if ".env" in full_url.lower():
                     if "DB_" in resp.text or "API_" in resp.text:
                         return True

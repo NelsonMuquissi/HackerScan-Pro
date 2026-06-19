@@ -16,6 +16,7 @@ class Notification(UUIDModel, TimestampedModel):
         VULNERABILITY_FOUND = "VULNERABILITY_FOUND", "Vulnerability Found"
         BILLING_ALERT = "BILLING_ALERT", "Billing Alert"
         SYSTEM_UPDATE = "SYSTEM_UPDATE", "System Update"
+        AUDIT_TAMPERING = "AUDIT_TAMPERING", "Audit Tampering Detected"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

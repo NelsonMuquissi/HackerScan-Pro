@@ -27,6 +27,7 @@ class Report(models.Model):
     file_url = models.URLField(max_length=500, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    integrity_hash = models.CharField(max_length=64, blank=True, null=True, help_text="SHA-256 hash for report verification")
 
     class Meta:
         ordering = ['-created_at']

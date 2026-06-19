@@ -72,6 +72,12 @@ FINDINGS_DETECTED_TOTAL = Counter(
     ["severity"],  # critical, high, medium, low, info
 )
 
+EVIDENCE_CAPTURED_TOTAL = Counter(
+    "hackerscan_evidence_captured_total",
+    "Total evidence items captured and processed by the Offensive Engine",
+    ["type"],  # visual_proof, raw_dump, curl_poc
+)
+
 
 def metrics_view(request):
     """

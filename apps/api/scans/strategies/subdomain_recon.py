@@ -3,8 +3,9 @@ import subprocess
 import json
 import tempfile
 import os
+import asyncio
 import httpx
-from typing import List, Set, Dict
+from typing import List, Set, Dict, AsyncGenerator, Optional
 from .base import BaseScanStrategy, register, FindingData
 from scans.models import Severity
 
@@ -29,110 +30,117 @@ class SubdomainReconStrategy(BaseScanStrategy):
     name = "Asset & Subdomain Discovery"
     description = "Deep reconnaissance of the target's attack surface using passive and active enumeration."
 
-    def run(self, target, scan=None) -> List[FindingData]:
+    async def run_async(self, target, scan=None) -> AsyncGenerator[FindingData, None]:
         host = target.host
-        subdomains: Set[str] = set()
-
-        # 1. Try Subfinder
-        self.log(scan, f"Running Subfinder on {host}...")
-        subdomains.update(self._run_subfinder(host))
-
-        # 2. Try crt.sh (Always works, very fast)
-        self.log(scan, f"Querying Certificate Transparency logs for {host}...")
-        subdomains.update(self._get_crt_sh_subdomains(host))
-
-        # 3. Try Amass (Deep)
-        self.log(scan, f"Running Amass passive enum on {host}...")
-        subdomains.update(self._run_amass(host))
-
-        # 4. Try Gau (Historical)
-        self.log(scan, f"Fetching historical endpoints via Gau for {host}...")
-        subdomains.update(self._run_gau(host))
-
-        # 5. Fallback if still empty
-        if not subdomains:
-            self.log(scan, "No subdomains found via passive tools. Running emergency DNS brute force...")
-            subdomains.update(self._run_dns_bruteforce(host))
-
-        if not subdomains:
-            return []
-
-        # 6. Validate findings & Grab Titles (The "Proof")
-        self.log(scan, f"Validating {len(subdomains)} candidates and grabbing HTTP titles...")
-        assets = self._validate_and_fingerprint(list(subdomains), host, scan)
-
-        if not assets:
-            return []
-
-        # Categorize for the finding
-        high_value = [a for a in assets if any(kw in a['subdomain'].lower() for kw in HIGH_VALUE_KEYWORDS)]
         
-        finding_desc = f"Automated reconnaissance discovered {len(assets)} active subdomains/assets for {host}."
-        if high_value:
-            finding_desc += "\n\n### High-Value Assets Detected:\n" + "\n".join([f"- {a['subdomain']} ({a['ip']})" for a in high_value[:5]])
-
-        # We take the first active asset as a "representative" for the request/response evidence
-        primary_asset = high_value[0] if high_value else assets[0]
-
-        findings = [FindingData(
-            title=f"Subdomain Discovery: {len(assets)} Active Assets Found",
-            description=finding_desc,
-            severity=Severity.HIGH if high_value else Severity.INFO,
-            evidence={
-                "assets": assets[:100], # Limit UI payload
-                "total_count": len(assets),
-                "primary_host": primary_asset["subdomain"]
-            },
-            remediation="1. Review discovered subdomains for unauthorized or legacy environments (Shadow IT).\n2. Decommission unused subdomains and DNS records (prevent Subdomain Takeover).\n3. Ensure all discovered assets are covered by standard security monitoring.",
-            plugin_slug=self.slug,
-            request=primary_asset.get("req_dump", ""),
-            response=primary_asset.get("res_dump", ""),
-            poc=primary_asset.get("poc", f"subfinder -d {host} -silent"),
-            is_verified=True
-        )]
-
-        return findings
-
-    def verify(self, finding: "Finding") -> bool:
-        """Verify by checking if at least one of the discovered subdomains still resolves and responds."""
-        from scans.utils import make_evidence_request
+        # We'll use a set to avoid duplicates across different tools
+        found_subdomains = set()
         
-        assets = finding.evidence.get("assets", [])
-        if not assets:
-            primary = finding.evidence.get("primary_host")
-            if primary:
-                assets = [{"subdomain": primary}]
-            else:
-                return False
-
-        # Check up to 3 subdomains for verification
-        for asset in assets[:3]:
-            sub = asset.get("subdomain")
-            if not sub: continue
-            
+        # 1. Run all recon tools in parallel
+        self.log(scan, f"Starting parallel reconnaissance on {host}...")
+        
+        recon_tasks = [
+            self._run_subfinder_async(host),
+            self._get_crt_sh_subdomains_async(host),
+            self._run_amass_async(host),
+            self._run_gau_async(host)
+        ]
+        
+        # Process tool results as they finish
+        for task in asyncio.as_completed(recon_tasks):
             try:
-                # Try HTTPS then HTTP
-                resp, req, res, poc = make_evidence_request(f"https://{sub}", timeout=5)
-                if not resp:
-                    resp, req, res, poc = make_evidence_request(f"http://{sub}", timeout=5)
-                
-                if resp:
-                    # Update the finding with fresh dumps from one successful check
-                    finding.request = req
-                    finding.response = res
-                    finding.poc = poc
-                    return True
-            except Exception:
-                continue
+                new_subs = await task
+                found_subdomains.update(new_subs)
+                self.log(scan, f"Found {len(new_subs)} potential candidates from a tool.")
+            except Exception as e:
+                logger.error(f"Recon tool error: {e}")
+ 
+        if not found_subdomains:
+            self.log(scan, "No subdomains found via passive tools. Running emergency DNS brute force...")
+            found_subdomains.update(await self._run_dns_bruteforce_async(host))
+ 
+        if not found_subdomains:
+            return
+ 
+        # 2. Validate and stream findings in real-time
+        self.log(scan, f"Validating {len(found_subdomains)} candidates and streaming findings...")
+        
+        semaphore = asyncio.Semaphore(10) # Validate 10 at a time
+        
+        async def _validate_and_yield(sub):
+            async with semaphore:
+                asset = await self._validate_single_sub_async(sub, host, scan)
+                if asset:
+                    high_val = any(kw in sub.lower() for kw in HIGH_VALUE_KEYWORDS)
+                    return FindingData(
+                        title=f"Discovered Subdomain: {sub}",
+                        description=(
+                            f"An active asset was discovered at `{sub}` during the reconnaissance phase. "
+                            "This asset responds to network probes and may expose further attack surface.\n\n"
+                            f"**REAL DATA PROOF**:\n"
+                            f"- **Host**: {sub}\n"
+                            f"- **Resolved IP**: {asset['ip']}\n"
+                            f"- **HTTP Title**: {asset['title']}"
+                        ),
+                        severity=Severity.HIGH if high_val else Severity.INFO,
+                        evidence=asset,
+                        remediation="Ensure this asset is authorized and covered by security monitoring.",
+                        plugin_slug=self.slug,
+                        request=asset.get("req_dump", ""),
+                        response=asset.get("res_dump", ""),
+                        poc=asset.get("poc", f"subfinder -d {host} -silent"),
+                        is_verified=True
+                    )
+                return None
+ 
+        # Use unique subdomains only
+        unique_subs = list(found_subdomains)
+        validation_tasks = [_validate_and_yield(sub) for sub in unique_subs[:100]] # Cap at 100
+        
+        for task in asyncio.as_completed(validation_tasks):
+            finding = await task
+            if finding:
+                yield finding
+ 
+    async def verify_async(self, finding) -> bool:
+        """Native async verification."""
+        import asyncio
+        from scans.utils import make_evidence_request_async
+        
+        sub = finding.evidence.get("subdomain") or finding.evidence.get("primary_host")
+        if not sub:
+            return False
+ 
+        try:
+            # Try HTTPS then HTTP
+            resp, req, res, poc = await make_evidence_request_async(f"https://{sub}", timeout=5)
+            if not resp:
+                resp, req, res, poc = await make_evidence_request_async(f"http://{sub}", timeout=5)
+            
+            if resp:
+                finding.request = req
+                finding.response = res
+                finding.poc = poc
+                finding.is_verified = True
+                from asgiref.sync import sync_to_async
+                await sync_to_async(finding.save)()
+                return True
+        except Exception:
+            pass
         return False
 
-    def _run_subfinder(self, host: str) -> List[str]:
+    async def _run_subfinder_async(self, host: str) -> List[str]:
         results = []
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tf:
             output_file = tf.name
         try:
             cmd = ["subfinder", "-d", host, "-o", output_file, "-silent"]
-            subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await asyncio.wait_for(process.wait(), timeout=120)
             if os.path.exists(output_file):
                 with open(output_file, "r") as f:
                     results = [line.strip() for line in f if line.strip()]
@@ -142,25 +150,35 @@ class SubdomainReconStrategy(BaseScanStrategy):
             if os.path.exists(output_file): os.remove(output_file)
         return results
 
-    def _run_amass(self, host: str) -> List[str]:
+    async def _run_amass_async(self, host: str) -> List[str]:
         results = []
         try:
             cmd = ["amass", "enum", "-passive", "-d", host, "-silent"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=180)
-            if proc.stdout:
-                results = [line.strip() for line in proc.stdout.split("\n") if line.strip()]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=180)
+            if stdout:
+                results = [line.strip() for line in stdout.decode().split("\n") if line.strip()]
         except Exception:
             pass
         return results
 
-    def _run_gau(self, host: str) -> List[str]:
+    async def _run_gau_async(self, host: str) -> List[str]:
         results = set()
         try:
             cmd = ["gau", host, "--subs", "--threads", "5"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
-            if proc.stdout:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=60)
+            if stdout:
                 from urllib.parse import urlparse
-                for line in proc.stdout.split("\n"):
+                for line in stdout.decode().split("\n"):
                     line = line.strip()
                     if not line: continue
                     if not line.startswith(("http://", "https://")): line = "http://" + line
@@ -175,77 +193,77 @@ class SubdomainReconStrategy(BaseScanStrategy):
             pass
         return list(results)
 
-    def _get_crt_sh_subdomains(self, domain: str) -> List[str]:
+    async def _get_crt_sh_subdomains_async(self, domain: str) -> List[str]:
         results = set()
         try:
             url = f"https://crt.sh/?q=%.{domain}&output=json"
-            response = httpx.get(url, timeout=20)
-            if response.status_code == 200:
-                data = response.json()
-                for entry in data:
-                    name_value = entry.get("name_value", "")
-                    for name in name_value.split("\n"):
-                        name = name.strip().lower()
-                        if name.endswith(domain) and "*" not in name:
-                            results.add(name)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=20)
+                if response.status_code == 200:
+                    data = response.json()
+                    for entry in data:
+                        name_value = entry.get("name_value", "")
+                        for name in name_value.split("\n"):
+                            name = name.strip().lower()
+                            if name.endswith(domain) and "*" not in name:
+                                results.add(name)
         except Exception:
             pass
         return list(results)
 
-    def _run_dns_bruteforce(self, host: str) -> List[str]:
+    async def _run_dns_bruteforce_async(self, host: str) -> List[str]:
         famous_subs = ["www", "mail", "dev", "api", "admin", "app", "vpn", "test", "demo", "portal", "staging"]
         results = []
-        import socket
-        for sub in famous_subs:
+        
+        async def _check(sub):
             candidate = f"{sub}.{host}"
             try:
-                socket.gethostbyname(candidate)
-                results.append(candidate)
+                # Use getaddrinfo for async-friendly DNS lookup
+                await asyncio.get_event_loop().getaddrinfo(candidate, None)
+                return candidate
             except Exception:
-                continue
-        return results
+                return None
 
-    def _validate_and_fingerprint(self, subdomains: List[str], host: str, scan) -> List[Dict]:
-        import socket
+        tasks = [_check(sub) for sub in famous_subs]
+        completed = await asyncio.gather(*tasks)
+        return [c for c in completed if c]
+
+    async def _validate_single_sub_async(self, sub: str, host: str, scan) -> Optional[Dict]:
         from bs4 import BeautifulSoup
-        from scans.utils import make_evidence_request
-        assets = []
+        from scans.utils import make_evidence_request_async
         
-        # Limit to top 50 for performance
-        seen = set()
-        unique_subs = [s for s in subdomains if not (s in seen or seen.add(s))]
-        
-        for sub in unique_subs[:50]:
-            try:
-                ip = socket.gethostbyname(sub)
-                title = "N/A"
-                req_dump = ""
-                res_dump = ""
-                poc = ""
+        try:
+            # Use getaddrinfo for async-friendly DNS lookup
+            addr_info = await asyncio.get_event_loop().getaddrinfo(sub, None)
+            ip = addr_info[0][4][0]
+            
+            title = "N/A"
+            req_dump = ""
+            res_dump = ""
+            poc = ""
 
-                # Try HTTPS then HTTP
-                resp, req_dump, res_dump, poc = make_evidence_request(f"https://{sub}", timeout=3)
-                if not resp:
-                    resp, req_dump, res_dump, poc = make_evidence_request(f"http://{sub}", timeout=3)
-                
-                if resp:
-                    try:
-                        soup = BeautifulSoup(resp.text, "html.parser")
-                        title = soup.title.string.strip() if soup.title else "No Title"
-                    except Exception:
-                        title = "Response parsing failed"
-                else:
-                    title = "Unreachable (HTTPS/HTTP)"
-                
-                assets.append({
-                    "subdomain": sub,
-                    "ip": ip,
-                    "title": title[:100],
-                    "req_dump": req_dump,
-                    "res_dump": res_dump,
-                    "poc": poc
-                })
-                self.log(scan, f"  [+] {sub} -> {ip} ({title[:30]})")
-            except Exception:
-                continue
-        return assets
+            # Try HTTPS then HTTP
+            resp, req_dump, res_dump, poc = await make_evidence_request_async(f"https://{sub}", timeout=3)
+            if not resp:
+                resp, req_dump, res_dump, poc = await make_evidence_request_async(f"http://{sub}", timeout=3)
+            
+            if resp:
+                try:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    title = soup.title.string.strip() if soup.title and soup.title.string else "No Title"
+                except Exception:
+                    title = "Response parsing failed"
+            else:
+                title = "Unreachable (HTTPS/HTTP)"
+            
+            self.log(scan, f"  [+] {sub} -> {ip} ({title[:30]})")
+            return {
+                "subdomain": sub,
+                "ip": ip,
+                "title": title[:100],
+                "req_dump": req_dump,
+                "res_dump": res_dump,
+                "poc": poc
+            }
+        except Exception:
+            return None

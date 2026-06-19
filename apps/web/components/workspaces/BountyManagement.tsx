@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Shield, 
   Plus, 
@@ -54,18 +54,7 @@ export function BountyManagement() {
     internal_notes: ''
   });
 
-  useEffect(() => {
-    init();
-  }, []);
-
-  useEffect(() => {
-    if (workspaceId) {
-      if (activeTab === 'programs') loadPrograms();
-      else loadSubmissions();
-    }
-  }, [workspaceId, activeTab]);
-
-  async function init() {
+  const init = useCallback(async () => {
     try {
       const me = await getMe();
       if (me.workspace_id) {
@@ -74,9 +63,9 @@ export function BountyManagement() {
     } catch (error) {
       console.error('Failed to init workspace:', error);
     }
-  }
+  }, []);
 
-  async function loadPrograms() {
+  const loadPrograms = useCallback(async () => {
     if (!workspaceId) return;
     setLoading(true);
     try {
@@ -89,9 +78,9 @@ export function BountyManagement() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [workspaceId]);
 
-  async function loadSubmissions() {
+  const loadSubmissions = useCallback(async () => {
     if (!workspaceId) return;
     setLoading(true);
     try {
@@ -104,7 +93,18 @@ export function BountyManagement() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    init();
+  }, [init]);
+
+  useEffect(() => {
+    if (workspaceId) {
+      if (activeTab === 'programs') loadPrograms();
+      else loadSubmissions();
+    }
+  }, [workspaceId, activeTab, loadPrograms, loadSubmissions]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

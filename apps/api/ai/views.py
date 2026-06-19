@@ -60,21 +60,66 @@ class AIRemediationView(WorkspaceScopedViewMixin, views.APIView):
         workspace = finding.scan.target.workspace
         
         express = request.data.get("express", False)
+        target_language = request.data.get("target_language")
         
         try:
             remediation = ai_service.generate_remediation_code(
                 finding.title, 
                 finding.description,
+                evidence=finding.evidence,
+                target_language=target_language,
                 workspace=workspace,
                 user=request.user,
                 express=express
             )
             
-            if not finding.ai_remediation:
-                finding.ai_remediation = remediation
-                finding.save(update_fields=['ai_remediation'])
+            # Se for uma linguagem específica, não sobrescrevemos o padrão, ou então sobrescrevemos. 
+            # O roadmap diz que é para ajudar o dev. Vamos salvar sempre que gerar, ou retornar. 
+            # Como finding.ai_remediation é o campo que aparece na UI principal, atualizar faz sentido.
+            finding.ai_remediation = remediation
+            finding.save(update_fields=['ai_remediation'])
                 
             return Response({"remediation": remediation})
+            
+        except InsufficientCreditsError as e:
+            return Response({
+                "detail": "Créditos de IA insuficientes.",
+                "needed": e.needed,
+                "available": e.available,
+                "shortfall": e.shortfall
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
+
+class AICopilotChatView(WorkspaceScopedViewMixin, views.APIView):
+    """
+    Handles real-time chat with the AI Remediation Copilot.
+    """
+    permission_classes = [IsWorkspaceMember]
+
+    def post(self, request, finding_id):
+        wid = self.get_workspace_id(request)
+        finding = get_object_or_404(Finding, id=finding_id, scan__target__workspace_id=wid)
+        workspace = finding.scan.target.workspace
+        
+        message = request.data.get("message")
+        history = request.data.get("history", [])
+        express = request.data.get("express", False)
+        
+        if not message:
+            return Response({"detail": "Mensagem não pode estar vazia."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            reply = ai_service.chat_copilot(
+                finding_title=finding.title, 
+                description=finding.description,
+                evidence=finding.evidence,
+                user_message=message,
+                history=history,
+                workspace=workspace,
+                user=request.user,
+                express=express
+            )
+            return Response({"reply": reply})
             
         except InsufficientCreditsError as e:
             return Response({

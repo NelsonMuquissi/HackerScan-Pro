@@ -1,335 +1,207 @@
+{% load report_tags %}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>Executive Risk Summary | HackerScan Pro</title>
+    <link rel="stylesheet" href="report.css">
     <style>
-        :root {
-            --primary: #00ff00;
-            --background: #050505;
-            --surface: #0a0a0a;
-            --card: #111111;
-            --border: rgba(0, 255, 0, 0.1);
-            --text: #e2e8f0;
-            --text-muted: #94a3b8;
-            --critical: #ef4444;
-            --high: #f97316;
-            --medium: #eab308;
-            --low: #3b82f6;
-        }
-
-        @page {
-            size: A4;
-            margin: 0;
+        /* Executive-specific overrides */
+        .cover-page {
             background: #050505;
-        }
-
-        @page :left {
-            @bottom-left {
-                content: "HackerScan Pro - Executive Summary";
-                color: #333;
-                font-size: 8pt;
-                padding-left: 50px;
-            }
-        }
-
-        @page :right {
-            @bottom-right {
-                content: "Page " counter(page);
-                color: #333;
-                font-size: 8pt;
-                padding-right: 50px;
-            }
-        }
-
-        body {
-            background-color: #050505;
-            color: var(--text);
-            font-family: 'Helvetica', 'Arial', sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 0;
-            word-wrap: break-word;
-            overflow-wrap: anywhere;
-        }
-
-        .page {
-            width: 210mm;
+            border-right: 15pt solid var(--primary);
             height: 297mm;
-            padding: 0;
-            margin: 0;
-            position: relative;
-            overflow: hidden;
-            page-break-after: always;
+            box-sizing: border-box;
         }
 
-        /* ── BACKGROUND ACCENTS ──────────────────────────────────────────────── */
         .bg-glow {
             position: absolute;
-            top: -100px;
-            right: -100px;
-            width: 400px;
-            height: 400px;
-            background: radial-gradient(circle, rgba(0, 255, 0, 0.05) 0%, transparent 70%);
+            top: -100pt;
+            right: -100pt;
+            width: 400pt;
+            height: 400pt;
+            background: radial-gradient(circle, rgba(0, 255, 0, 0.08) 0%, transparent 70%);
             z-index: 0;
         }
 
-        /* ── COVER PAGE ──────────────────────────────────────────────────────── */
-        .cover-page {
-            background: #050505;
-            border-right: 15px solid var(--primary);
-        }
-
         .cover-content {
-            padding: 120px 80px;
+            padding: 80pt 40pt;
             position: relative;
             z-index: 10;
         }
 
         .cover-logo {
-            width: 160px;
-            margin-bottom: 80px;
+            width: 140pt;
+            margin-bottom: 60pt;
         }
 
         .cover-title {
-            font-size: 64px;
+            font-size: 64pt;
             font-weight: 900;
             color: #ffffff;
             margin: 0;
-            line-height: 1;
-            letter-spacing: -2px;
+            line-height: 0.85;
+            letter-spacing: -3pt;
+            text-transform: uppercase;
         }
 
         .cover-subtitle {
-            font-size: 22px;
+            font-size: 18pt;
             color: var(--primary);
-            margin: 25px 0 0 0;
+            margin: 20pt 0 0 0;
             text-transform: uppercase;
-            letter-spacing: 8px;
+            letter-spacing: 6pt;
             font-weight: 300;
         }
 
         .cover-footer {
-            position: absolute;
-            bottom: 120px;
-            left: 80px;
+            margin-top: 120pt;
         }
 
-        /* ── CONTENT PAGES ───────────────────────────────────────────────────── */
-        .content-page {
-            padding: 60px 80px;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 20px;
-            margin-bottom: 40px;
-        }
-
-        .header-logo {
-            width: 100px;
-            opacity: 0.8;
-        }
-
-        .section-title {
-            font-size: 14px;
-            color: var(--primary);
-            text-transform: uppercase;
-            letter-spacing: 4px;
-            margin-bottom: 30px;
-            font-weight: 800;
-        }
-
-        h2 {
-            font-size: 24px;
-            color: #ffffff;
-            margin: 0 0 20px 0;
-        }
-
-        /* ── METRICS ─────────────────────────────────────────────────────────── */
-        .stat-grid {
-            display: table;
-            width: 100%;
-            border-spacing: 15px;
-            margin: 0 -15px 40px -15px;
-        }
-
-        .stat-card {
-            display: table-cell;
-            background: #111;
-            border: 1px solid var(--border);
-            padding: 30px;
-            border-radius: 20px;
-            text-align: center;
-            width: 33.33%;
-        }
-
-        .stat-value {
-            display: block;
-            font-size: 56px;
-            font-weight: 900;
-            line-height: 1;
-            margin-bottom: 10px;
-        }
-
-        .stat-label {
-            font-size: 11px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-
-        /* ── THREATS ─────────────────────────────────────────────────────────── */
         .threat-card {
-            background: #0a0a0a;
-            border: 1px solid var(--border);
-            border-left-width: 6px;
-            padding: 30px;
-            margin-bottom: 25px;
-            border-radius: 0 16px 16px 0;
-            page-break-inside: avoid;
+            border-left: 5pt solid var(--primary);
+            border-radius: 0 12pt 12pt 0;
         }
-
-        .threat-title {
-            font-size: 20px;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 15px;
-        }
-
-        .impact-box {
-            background: rgba(255, 255, 255, 0.02);
-            padding: 20px;
-            border-radius: 12px;
-            margin-top: 15px;
-        }
-
-        .impact-label {
-            font-size: 10px;
-            color: var(--primary);
-            font-weight: 900;
-            text-transform: uppercase;
-            margin-bottom: 8px;
-            display: block;
-        }
-
-        /* ── COLORS ─────────────────────────────────────────────────────────── */
-        .text-critical { color: var(--critical); }
-        .text-high { color: var(--high); }
-        .text-medium { color: var(--medium); }
 
         .border-critical { border-left-color: var(--critical); }
         .border-high { border-left-color: var(--high); }
+        .border-medium { border-left-color: var(--medium); }
 
+        .text-critical { color: var(--critical); }
+        .text-high { color: var(--high); }
+        .text-medium { color: var(--medium); }
     </style>
 </head>
 <body>
     <!-- PAGE 1: COVER -->
-    <div class="page cover-page">
+    <div class="page page-cover cover-page">
         <div class="bg-glow"></div>
         <div class="cover-content">
-            <img src="logo.png" class="cover-logo" alt="">
+            <img src="logo.png" class="cover-logo" alt="HackerScan Pro">
             <h1 class="cover-title">EXECUTIVE<br>RISK SUMMARY</h1>
             <p class="cover-subtitle">Strategic Intelligence</p>
             
             <div class="cover-footer">
-                <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px;">Target Infrastructure</div>
-                <div style="font-size: 28px; color: #ffffff; font-weight: 800; margin-bottom: 30px;">{{ scan.target.host|upper }}</div>
+                <div style="font-size: 10pt; color: var(--text-muted); margin-bottom: 8pt; text-transform: uppercase; letter-spacing: 2pt;">Target Infrastructure</div>
+                <div style="font-size: 28pt; color: #ffffff; font-weight: 900; margin-bottom: 40pt;">{{ scan.target|upper }}</div>
                 
-                <div style="display: table; width: 100%;">
-                    <div style="display: table-cell;">
-                        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Generated For</div>
-                        <div style="font-size: 16px; color: #fff; font-weight: 600;">{{ scan.workspace.name }}</div>
-                    </div>
-                    <div style="display: table-cell; padding-left: 40px;">
-                        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Audit Date</div>
-                        <div style="font-size: 16px; color: #fff; font-weight: 600;">{{ scan.created_at|date:"d M Y"|upper }}</div>
-                    </div>
-                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="width: 50%;">
+                            <div style="font-size: 8pt; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 4pt;">Generated For</div>
+                            <div style="font-size: 16pt; color: #fff; font-weight: 700;">{{ scan.workspace.name }}</div>
+                        </td>
+                        <td style="width: 50%;">
+                            <div style="font-size: 8pt; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 4pt;">Audit Date</div>
+                            <div style="font-size: 16pt; color: #fff; font-weight: 700;">{{ scan.created_at|date:"d M Y"|upper }}</div>
+                        </td>
+                    </tr>
+                </table>
             </div>
         </div>
     </div>
 
-    <!-- PAGE 2: SUMMARY -->
-    <div class="page content-page">
-        <div class="bg-glow" style="top: auto; bottom: -100px; right: auto; left: -100px;"></div>
-        <div class="header">
-            <img src="logo.png" class="header-logo" alt="">
-            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px;">Report ID: HSP-{{ scan.id|slice:":8"|upper }}</div>
+    <!-- PAGE 2: ASSESSMENT -->
+    <div class="page page-content">
+        <div class="header" style="margin-bottom: 40pt; border-bottom: 1px solid var(--border); padding-bottom: 15pt;">
+            <table style="width: 100%;">
+                <tr>
+                    <td><img src="logo.png" style="width: 80pt;" alt=""></td>
+                    <td style="text-align: right; vertical-align: bottom;">
+                        <div style="font-size: 8pt; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1pt;">Report ID: HSP-{{ scan.id|slice:":8"|upper }}</div>
+                    </td>
+                </tr>
+            </table>
         </div>
 
         <div class="section">
-            <div class="section-title">Security Posture Overview</div>
+            <span class="section-label">Security Posture Overview</span>
             <h2>Risk Assessment Matrix</h2>
-            <p style="font-size: 16px; color: var(--text-muted); margin-bottom: 40px;">
+            <p style="font-size: 12pt; color: var(--text-muted); margin-bottom: 30pt; max-width: 90%;">
                 Our AI-driven assessment identifies significant vulnerabilities in your external attack surface. 
-                Immediate action is recommended for all Critical and High severity findings.
+                The findings below represent the most critical vectors identified during the automated audit phase.
             </p>
 
-            <div class="stat-grid">
-                <div class="stat-card">
-                    <span class="stat-value text-critical">{{ scan.critical_count }}</span>
-                    <span class="stat-label">Critical Risks</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value text-high">{{ scan.high_count }}</span>
-                    <span class="stat-label">High Severity</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value" style="color: #fff;">{{ scan.findings|length }}</span>
-                    <span class="stat-label">Total Exposures</span>
+            <table class="stat-table">
+                <tr>
+                    <td class="stat-cell">
+                        <span class="stat-value text-critical">{{ scan.critical_count }}</span>
+                        <span class="stat-label">Critical</span>
+                    </td>
+                    <td class="stat-cell">
+                        <span class="stat-value text-high">{{ scan.high_count }}</span>
+                        <span class="stat-label">High</span>
+                    </td>
+                    <td class="stat-cell">
+                        <span class="stat-value" style="color: var(--low);">{{ scan.low_count|default:0 }}</span>
+                        <span class="stat-label">Low</span>
+                    </td>
+                    <td class="stat-cell">
+                        <span class="stat-value" style="color: #fff;">{{ scan.findings|length }}</span>
+                        <span class="stat-label">Total</span>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <span class="section-label">AI Strategic Analysis</span>
+            <div class="ai-note-box">
+                <div class="ai-tag-label">Neural Attack Prediction</div>
+                <div style="font-size: 11pt; line-height: 1.7; color: #ffffff;" class="markdown-content">
+                    {{ scan.ai_prediction|markdown }}
                 </div>
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-title">AI Strategic Analysis</div>
-            <div style="background: var(--surface); border: 1px solid var(--border); padding: 40px; border-radius: 24px; position: relative;">
-                <div style="position: absolute; top: -12px; left: 30px; background: var(--primary); color: #000; padding: 2px 15px; font-size: 10px; font-weight: 900; border-radius: 4px;">NEURAL ATTACK PREDICTION</div>
-                <div style="font-size: 15px; line-height: 1.8; color: #ffffff;">
-                    {{ scan.ai_prediction|linebreaksbr }}
-                </div>
+        <div class="section" style="margin-top: 40pt;">
+            <div class="glass-card" style="background: rgba(255, 255, 255, 0.02);">
+                <h3 style="font-size: 14pt; margin-bottom: 10pt;">Offensive Methodology</h3>
+                <p style="font-size: 10pt; color: var(--text-muted); margin: 0;">
+                    HackerScan Pro utilizes non-destructive payload delivery systems to verify vulnerability existence. 
+                    Our methodology prioritizes safety while ensuring 100% accuracy in finding verification.
+                </p>
             </div>
         </div>
     </div>
 
     <!-- PAGE 3: TOP THREATS -->
-    <div class="page content-page">
-        <div class="header">
-            <img src="logo.png" class="header-logo" alt="">
-            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px;">HackerScan Pro Intelligence</div>
-        </div>
-
+    <div class="page page-content">
         <div class="section">
-            <div class="section-title">Top Business Ameaças</div>
+            <span class="section-label">Top Business Threats</span>
+            <h2>Critical Exposure Registry</h2>
             
             {% for finding in scan.findings %}
                 {% if finding.severity|upper == 'CRITICAL' or finding.severity|upper == 'HIGH' %}
-                <div class="threat-card border-{{ finding.severity|lower }}">
-                    <div class="threat-title">{{ finding.title }}</div>
+                <div class="glass-card threat-card border-{{ finding.severity|lower }}" style="position: relative;">
+                    <div class="hud-corner hud-tl" style="border-radius: 0;"></div>
+                    <div class="hud-corner hud-tr"></div>
+                    <div class="severity-badge bg-{{ finding.severity|lower }}">{{ finding.severity }}</div>
+                    <div class="finding-title">{{ finding.title }}</div>
                     
-                    <div class="impact-box">
-                        <span class="impact-label">Business Impact</span>
-                        <div style="font-size: 14px; color: var(--text-muted);">{{ finding.business_impact|default:"Critical exposure that could lead to unauthorized data access, service disruption, or reputational damage." }}</div>
+                    <div style="margin-top: 15pt; background: rgba(255, 255, 255, 0.03); padding: 15pt; border-radius: 8pt;">
+                        <span style="font-size: 7pt; color: var(--primary); font-weight: 900; text-transform: uppercase; display: block; margin-bottom: 5pt;">Business Impact</span>
+                        <div style="font-size: 10pt; color: var(--text-muted);" class="markdown-content">
+                            {{ finding.business_impact|default:"Potential for unauthorized data exfiltration and service interruption."|markdown }}
+                        </div>
                     </div>
 
-                    <div style="margin-top: 20px;">
-                        <span class="impact-label">Strategic Remediation</span>
-                        <div style="font-size: 14px; color: #fff;">{{ finding.executive_summary|default:"Immediate technical remediation is required. Refer to the Technical Report for detailed implementation steps." }}</div>
+                    <div style="margin-top: 15pt;">
+                        <span style="font-size: 7pt; color: var(--primary); font-weight: 900; text-transform: uppercase; display: block; margin-bottom: 5pt;">Executive Remediation</span>
+                        <div style="font-size: 10pt; color: #fff;" class="markdown-content">
+                            {{ finding.executive_summary|default:"Refer to the Technical Report for implementation details."|markdown }}
+                        </div>
                     </div>
                 </div>
                 {% endif %}
             {% endfor %}
         </div>
 
-        <div style="margin-top: 60px; padding: 30px; border-radius: 16px; background: linear-gradient(to right, rgba(0,255,0,0.05), transparent); border-left: 4px solid var(--primary);">
-            <h3 style="margin: 0 0 10px 0; color: var(--primary); font-size: 18px;">Final Guidance</h3>
-            <p style="font-size: 14px; margin: 0; color: var(--text-muted);">
-                The current risk score for this target is elevated. We recommend immediate patching of the identified vectors. 
-                Continuous monitoring has been enabled for this host.
+        <div style="margin-top: 40pt; padding: 25pt; border-radius: 12pt; background: linear-gradient(to right, rgba(0,255,0,0.05), transparent); border-left: 3pt solid var(--primary); page-break-inside: avoid;">
+            <h3 style="margin: 0 0 8pt 0; color: var(--primary); font-size: 14pt;">Final Strategic Guidance</h3>
+            <p style="font-size: 10pt; margin: 0; color: var(--text-muted);">
+                The current threat level for {{ scan.target }} is **elevated**. 
+                Implementation of the remediation directives outlined in the Technical Report should be prioritized within the next 24-48 hours.
             </p>
         </div>
     </div>

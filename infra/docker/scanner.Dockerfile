@@ -58,6 +58,12 @@ RUN wget https://github.com/lc/gau/releases/download/v2.2.3/gau_2.2.3_linux_amd6
     && mv gau /usr/local/bin/ \
     && rm gau_2.2.3_linux_amd64.tar.gz
 
+# Ffuf (binary)
+RUN wget https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz \
+    && tar -xzf ffuf_2.1.0_linux_amd64.tar.gz \
+    && mv ffuf /usr/local/bin/ \
+    && rm ffuf_2.1.0_linux_amd64.tar.gz
+
 # XSStrike
 # WARNING: We use pip with --break-system-packages because Python 3.12+ enforces PEP 668 PEP-668 by default.
 # Alternatively we could use a venv for XSStrike, but since this is a dedicated scanner container, it's fine.
@@ -69,7 +75,12 @@ RUN pip install --break-system-packages sslyze
 
 # Install Python requirements
 COPY apps/api/requirements/base.txt ./requirements/
-RUN pip install --upgrade pip setuptools wheel && pip install -r requirements/base.txt
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    python -m pip install --break-system-packages -r requirements/base.txt
+
+# Playwright installation (needed for screenshots and XSS validation)
+RUN python -m playwright install-deps chromium && \
+    python -m playwright install chromium
 
 # Copy source code (needed for Celery tasks)
 COPY apps/api/ .

@@ -61,8 +61,25 @@ def generate_scan_report(report_id):
                     except Exception as ai_e:
                         logger.warning("Failed to generate AI remediation for %s: %s", finding.id, ai_e)
 
-            # finding.evidence is a JSONField; serialize it for template/export use
-            evidence_display = finding.evidence
+                # NEW: Populate Compliance Mapping if missing
+                if not finding.compliance_mapping:
+                    try:
+                        compliance, _ = ai_service.get_compliance_mapping(
+                            finding.title,
+                            finding.description
+                        )
+                        finding.compliance_mapping = compliance
+                        finding.save(update_fields=['compliance_mapping'])
+                    except Exception as ai_e:
+                        logger.warning("Failed to generate compliance mapping for %s: %s", finding.id, ai_e)
+
+            # Use dedicated visual_proof_b64 if available, fallback to evidence JSON
+            screenshot_data = finding.visual_proof_b64 or (
+                finding.evidence.get('visual_proof_b64') if isinstance(finding.evidence, dict) else None
+            )
+
+            # Serialize evidence for template/export use
+            evidence_display = finding.technical_details or finding.evidence or {}
             if isinstance(evidence_display, (dict, list)):
                 import json as _json  # noqa: PLC0415
                 evidence_display = _json.dumps(evidence_display, indent=2)
@@ -72,11 +89,17 @@ def generate_scan_report(report_id):
                 'severity': finding.severity,
                 'description': finding.description,
                 'evidence': evidence_display,
-                'payload': evidence_display,  # For template compatibility
+                'screenshot': screenshot_data,
+                'payload': finding.poc or evidence_display,  # Prefer POC for technical evidence
+                'request': finding.request,
+                'response': finding.response,
+                'poc': finding.poc,
+                'is_verified': finding.is_verified,
                 'remediation': finding.remediation,
                 'status': 'Resolved' if finding.resolved_at else ('False Positive' if finding.is_false_positive else 'Open'),
                 'ai_explanation': ai_explanation or finding.description,
                 'ai_remediation': ai_remediation or finding.remediation,
+                'compliance': finding.compliance_mapping or {},
                 'business_impact': getattr(finding, 'business_impact', "Possible data exposure or service disruption."),
                 'executive_summary': getattr(finding, 'executive_summary', "Immediate mitigation recommended by the technical team."),
             })
@@ -154,12 +177,24 @@ def generate_scan_report(report_id):
                 content_type = "text/html"
             
             # Upload to storage
+            import hashlib
+            hash_content = content.encode('utf-8') if isinstance(content, str) else content
+            file_hash = hashlib.sha256(hash_content).hexdigest()
+            report.integrity_hash = file_hash
+            
             file_url = storage_service.upload_file(content, file_name, content_type=content_type)
             
             if file_url:
                 report.status = Report.Status.COMPLETED
                 report.file_url = file_url
                 report.save()
+                
+                # Sync report to Scan model for immediate UI access (Technical PDF is the default)
+                if report.type == Report.Type.TECHNICAL and report.format == Report.Format.PDF:
+                    # We store the URL directly. Django FileField handles strings.
+                    scan.report_file = file_url
+                    scan.save(update_fields=['report_file'])
+                    
                 logger.info(f"Report {report_id} generated and uploaded successfully.")
             else:
                 raise ValueError("Failed to upload report to storage")

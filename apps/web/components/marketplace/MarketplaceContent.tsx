@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   ShoppingBag, 
   Zap, 
@@ -53,11 +53,7 @@ export function MarketplaceContent() {
   const params = useParams();
   const workspaceId = params.workspaceId as string;
 
-  useEffect(() => {
-    fetchModules();
-  }, [workspaceId]);
-
-  const fetchModules = async () => {
+  const fetchModules = useCallback(async () => {
     try {
       const data = await listMarketplaceModules(workspaceId);
       // Handle both plain arrays and paginated responses { results: [...] }
@@ -74,7 +70,11 @@ export function MarketplaceContent() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    fetchModules();
+  }, [fetchModules]);
 
   const handlePurchase = async (module: SecurityModule) => {
     if (module.is_purchased) {
@@ -129,7 +129,7 @@ export function MarketplaceContent() {
             MODULAR <span className="text-neon-green italic">DEFENSE</span>
           </h1>
           <p className="text-gray-400 max-w-xl mx-auto text-sm leading-relaxed font-mono uppercase tracking-tighter">
-            Extend your infrastructure's analytical surface with specialized security primitives and tactical modules.
+            Extend your infrastructure&apos;s analytical surface with specialized security primitives and tactical modules.
           </p>
         </motion.div>
       </div>

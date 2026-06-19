@@ -57,7 +57,7 @@ export default function LoginPage() {
         <p className="text-gray-400 font-mono text-sm">Enter your credentials to access the system.</p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form method="POST" onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {apiError && (
           <div className="bg-neon-red/10 border border-neon-red px-4 py-3 rounded text-neon-red text-sm font-mono mb-4">
             {apiError}
@@ -99,7 +99,7 @@ export default function LoginPage() {
 
       <div className="mt-8 text-center border-t border-card-border pt-6">
         <p className="text-sm text-gray-400 font-mono">
-          Don't have clearance? <Link href="/register" className="text-neon-green hover:underline">Request access</Link>
+          Don&apos;t have clearance? <Link href="/register" className="text-neon-green hover:underline">Request access</Link>
         </p>
       </div>
     </div>

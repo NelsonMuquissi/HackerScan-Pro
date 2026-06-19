@@ -1,0 +1,47 @@
+name: 'HackerScan Pro DAST'
+description: 'Runs HackerScan Pro against your staging or production environment to find vulnerabilities.'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  target-url:
+    description: 'The URL to scan (e.g., https://staging.myapp.com)'
+    required: true
+  api-key:
+    description: 'HackerScan Pro API Key'
+    required: true
+  fail-on:
+    description: 'Comma-separated list of severities that should fail the build'
+    required: false
+    default: 'high,critical'
+  scan-type:
+    description: 'The type of scan to perform (quick, vuln, full)'
+    required: false
+    default: 'quick'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install requests argparse
+        
+    - name: Run HackerScan Pro CI Integration
+      shell: bash
+      run: |
+        # Download the latest CLI script
+        curl -sSL https://raw.githubusercontent.com/NelsonMuquissi/HackerScan-Pro/main/scripts/ci_cd/hackerscan-ci.py -o hackerscan-ci.py
+        
+        # Execute the scan
+        python hackerscan-ci.py \
+          --target-url "${{ inputs.target-url }}" \
+          --api-key "${{ inputs.api-key }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          --scan-type "${{ inputs.scan-type }}"

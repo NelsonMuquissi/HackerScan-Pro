@@ -10,6 +10,9 @@ import logging
 from .channels.base import NotificationPayload
 from .channels.email import EmailChannel
 from .channels.webhook import WebhookChannel
+from .channels.splunk import SplunkChannel
+from .channels.jira import JiraChannel
+from .channels.slack import SlackChannel
 from .models import NotificationPreference
 
 logger = logging.getLogger(__name__)
@@ -18,6 +21,9 @@ logger = logging.getLogger(__name__)
 _CHANNEL_REGISTRY = {
     "email":   EmailChannel(),
     "webhook": WebhookChannel(),
+    "splunk":  SplunkChannel(),
+    "jira":    JiraChannel(),
+    "slack":   SlackChannel(),
 }
 
 
