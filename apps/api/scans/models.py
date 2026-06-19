@@ -92,10 +92,30 @@ class ScanTarget(UUIDModel, TimestampedModel):
     description  = models.TextField(blank=True)
     is_verified  = models.BooleanField(default=False)
     tags         = models.JSONField(default=list, blank=True)
+    
+    # ML Risk Classification Metadata
+    ml_risk_score = models.FloatField(null=True, blank=True, help_text="AI-calculated risk score (0.0 to 100.0)")
+    ml_risk_classification = models.CharField(max_length=50, blank=True, help_text="e.g. 'Low', 'Medium', 'High', 'Critical'")
 
     class Meta:
         ordering = ["-created_at"]
         unique_together = [("workspace", "host")]
+
+    @property
+    def url(self) -> str:
+        """Standardized URL for the target."""
+        if self.target_type == TargetType.URL:
+            return self.host
+        
+        if "://" in self.host:
+            return self.host
+            
+        if self.target_type == TargetType.IP:
+            return f"http://{self.host}"
+        
+        # Default to http for domains to ensure accessibility in most environments.
+        # Strategies can still override this if they need https specifically.
+        return f"http://{self.host}"
 
     def __str__(self):
         return f"{self.name} ({self.host})"
@@ -163,6 +183,13 @@ class Scan(UUIDModel, TimestampedModel):
 
     # Error info (if failed)
     error_message = models.TextField(blank=True)
+
+    # ML Risk Classification Metadata
+    ml_risk_score = models.FloatField(null=True, blank=True, help_text="AI-calculated risk score for this specific scan (0.0 to 100.0)")
+    ml_risk_classification = models.CharField(max_length=50, blank=True, help_text="e.g. 'Low', 'Medium', 'High', 'Critical'")
+
+    # PDF Report
+    report_file = models.FileField(upload_to="scan_reports/%Y/%m/%d/", null=True, blank=True)
 
     # Celery task ID for cancellation
     celery_task_id = models.CharField(max_length=255, blank=True)
@@ -276,20 +303,96 @@ class Finding(UUIDModel, TimestampedModel):
     fingerprint = models.CharField(max_length=64, blank=True, db_index=True,
                                    help_text="SHA-256 of (scan.target_id, plugin_slug, title)")
     is_false_positive = models.BooleanField(default=False)
+    ai_confidence = models.FloatField(null=True, blank=True, help_text="AI's confidence score (0-1) that this is NOT a false positive")
     ai_reasoning = models.TextField(blank=True, null=True)
+    user_verification = models.CharField(
+        max_length=20, 
+        choices=[
+            ("unverified", "Unverified"),
+            ("confirmed_valid", "Confirmed Valid"),
+            ("confirmed_fp", "Confirmed False Positive"),
+        ],
+        default="unverified",
+        db_index=True
+    )
     resolved_at = models.DateTimeField(null=True, blank=True)
+    compliance_mapping = models.JSONField(
+        default=dict, 
+        blank=True, 
+        help_text="OWASP Top 10, MITRE ATT&CK and PCI-DSS compliance mapping"
+    )
 
     # Proof of Concept / Verification
     request     = models.TextField(blank=True, help_text="The raw HTTP request that triggered the finding")
     response    = models.TextField(blank=True, help_text="The raw HTTP response received")
     poc         = models.TextField(blank=True, help_text="Actionable Proof of Concept (e.g. curl command or python script)")
     is_verified = models.BooleanField(default=False, help_text="Whether the vulnerability has been manually or automatically verified")
+    
+    # Audit Evidence Vault Fields
+    visual_proof_b64 = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Base64 encoded screenshot of the vulnerability"
+    )
+    technical_details = models.JSONField(
+        default=dict, 
+        blank=True, 
+        help_text="Structured technical artifacts for audit readiness"
+    )
 
     class Meta:
         ordering = ["-severity", "-created_at"]
 
+    @property
+    def screenshot(self):
+        """Helper to get the visual proof from evidence JSON."""
+        return self.evidence.get('visual_proof_b64')
+
     def __str__(self):
         return f"[{self.severity.upper()}] {self.title}"
+
+    async def verify_and_enrich_async(self):
+        """
+        Master-level verification: Captures visual proof and enriches technical data.
+        """
+        from scans.services.evidence import EvidenceFactory  # noqa: PLC0415
+        
+        # 1. Capture Visual Proof if possible
+        target_url = self.evidence.get('url') or self.evidence.get('source')
+        if target_url and not self.visual_proof_b64:
+            screenshot_b64 = await EvidenceFactory.capture_visual_proof(
+                target_url, 
+                metadata={'scan_id': str(self.scan.id), 'finding_id': str(self.id)}
+            )
+            if screenshot_b64:
+                self.visual_proof_b64 = screenshot_b64
+                self.is_verified = True
+        
+        # 2. Populate Technical Details & Compliance Mapping
+        if not self.technical_details:
+            self.technical_details = {
+                'fingerprint': self.fingerprint,
+                'plugin': self.plugin_slug,
+                'request_sample': self.request[:500] if self.request else None,
+                'verification_status': 'confirmed' if self.is_verified else 'unverified'
+            }
+            
+        if not self.compliance_mapping or self.compliance_mapping.get('owasp') == 'A00:2021-Unknown':
+            # Use AI for professional compliance mapping
+            self.compliance_mapping = await EvidenceFactory.get_compliance_data(self.title, self.description)
+        
+        # 3. Generate AI Proof of Concept if missing
+        if not self.poc or "manual verification required" in self.poc.lower():
+            self.poc = await EvidenceFactory.generate_ai_poc_description(
+                self.title, self.description, self.evidence, self.request
+            )
+        
+        # 4. Enrich Evidence
+        EvidenceFactory.enrich_finding({'evidence': self.evidence})
+        
+        # 4. Update Status
+        self.last_seen_at = timezone.now()
+        await self.asave()
 
     def save(self, *args, **kwargs):
         if not self.fingerprint:

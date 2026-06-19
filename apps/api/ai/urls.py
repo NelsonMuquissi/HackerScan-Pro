@@ -4,6 +4,7 @@ from . import views, views_credits
 urlpatterns = [
     path('findings/<uuid:finding_id>/explain/', views.AIExplanationView.as_view(), name='ai-explain'),
     path('findings/<uuid:finding_id>/remediate/', views.AIRemediationView.as_view(), name='ai-remediate'),
+    path('findings/<uuid:finding_id>/chat/', views.AICopilotChatView.as_view(), name='ai-chat'),
     path('scans/<uuid:scan_id>/prediction/', views.AIScanPredictionView.as_view(), name='ai-scan-prediction'),
 
     # Credits

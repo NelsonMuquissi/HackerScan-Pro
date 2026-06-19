@@ -1,0 +1,30 @@
+{
+  "extends": [
+    "next/core-web-vitals",
+    "plugin:react/recommended",
+    "plugin:react/jsx-runtime"
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es6": true
+  },
+  "rules": {
+    "no-undef": "error",
+    "react/react-in-jsx-scope": "off"
+  },
+  "globals": {
+    "NodeJS": "readonly",
+    "React": "readonly",
+    "RequestInit": "readonly",
+    "Headers": "readonly",
+    "Blob": "readonly",
+    "FormData": "readonly",
+    "File": "readonly"
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    }
+  }
+}

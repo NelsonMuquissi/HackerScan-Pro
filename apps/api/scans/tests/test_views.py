@@ -79,7 +79,7 @@ class TestScanListCreate:
         assert r.status_code == 200
         assert len(r.data) == 1
 
-    def test_create(self, auth_client, target):
+    def test_create(self, auth_client, target, subscription):
         r = auth_client.post(self.URL, {
             "target_id": str(target.id),
             "plugin_ids": ["port_scan"],

@@ -59,6 +59,17 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "email", "full_name", "avatar_url", "role"]
         read_only_fields = fields
 
+class GlobalAdminUserSerializer(serializers.ModelSerializer):
+    """Admin-only representation of a user with full details."""
+    class Meta:
+        model = User
+        fields = [
+            "id", "email", "full_name", "role", "is_active", 
+            "email_verified", "totp_enabled", "last_login_at", 
+            "last_login_ip", "created_at", "updated_at"
+        ]
+        read_only_fields = ["id", "created_at", "updated_at", "last_login_at", "last_login_ip"]
+
 
 class UserMeSerializer(serializers.ModelSerializer):
     """Public representation of the authenticated user — no sensitive fields."""
@@ -190,15 +201,32 @@ class WorkspaceInviteSerializer(serializers.ModelSerializer):
 
 class AuditLogSerializer(serializers.ModelSerializer):
     user_email = serializers.SerializerMethodField()
+    workspace_name = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
+    is_chain_valid = serializers.SerializerMethodField()
 
     class Meta:
         from .models import AuditLog
         model = AuditLog
         fields = [
-            "id", "action", "user_email", "resource_type", 
-            "resource_id", "ip_address", "created_at", "metadata"
+            "id", "action", "user_email", "workspace_name", "resource_type", 
+            "resource_id", "ip_address", "user_agent", "created_at", "metadata",
+            "previous_hash", "current_hash", "is_verified", "is_chain_valid"
         ]
         read_only_fields = fields
 
     def get_user_email(self, obj):
         return obj.user.email if obj.user else "System"
+
+    def get_workspace_name(self, obj):
+        return obj.workspace.name if obj.workspace else None
+
+    def get_is_verified(self, obj):
+        if not obj.current_hash:
+            return None
+        return obj.verify_integrity()
+
+    def get_is_chain_valid(self, obj):
+        if not obj.previous_hash:
+            return None
+        return obj.verify_chain_link()

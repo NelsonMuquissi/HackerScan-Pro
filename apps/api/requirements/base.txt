@@ -36,6 +36,7 @@ channels-redis
 
 # Report Generation
 WeasyPrint
+markdown
 
 # External Integrations
 boto3
@@ -45,3 +46,5 @@ httpx
 shodan
 sslyze
 beautifulsoup4
+playwright
+certstream

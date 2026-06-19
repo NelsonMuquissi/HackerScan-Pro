@@ -54,7 +54,9 @@ export default function RegisterPage() {
           id: userData.id,
           email: userData.email,
           name: userData.full_name || userData.email,
-          plan: userData.subscription_plan || 'Free'
+          plan: userData.subscription_plan || 'Free',
+          role: userData.role || 'member',
+          workspace_id: userData.workspace_id
         }, tokens.access);
         router.push('/dashboard');
       } catch {
@@ -73,7 +75,7 @@ export default function RegisterPage() {
         <p className="text-gray-400 font-mono text-sm">Create a new operator account.</p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form method="POST" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {apiError && (
           <div className="bg-neon-red/10 border border-neon-red px-4 py-3 rounded text-neon-red text-sm font-mono mb-4">
             {apiError}

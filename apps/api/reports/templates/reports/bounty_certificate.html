@@ -1,0 +1,188 @@
+{% load report_tags %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Compliance Certificate | {{ submission.id|slice:":8" }}</title>
+    <link rel="stylesheet" href="report.css">
+    <style>
+        .cert-page {
+            background: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #050505 100%);
+            border: 20pt solid transparent;
+            border-image: linear-gradient(135deg, var(--primary) 0%, #004400 100%) 30;
+            height: 297mm;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        .cert-watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 120pt;
+            color: rgba(0, 255, 0, 0.03);
+            font-weight: 900;
+            z-index: 0;
+            white-space: nowrap;
+        }
+
+        .cert-header {
+            text-align: center;
+            margin-top: 40pt;
+            position: relative;
+            z-index: 10;
+        }
+
+        .cert-title {
+            font-size: 42pt;
+            font-weight: 900;
+            letter-spacing: -1pt;
+            text-transform: uppercase;
+            margin-bottom: 5pt;
+        }
+
+        .cert-subtitle {
+            color: var(--primary);
+            font-size: 12pt;
+            letter-spacing: 4pt;
+            text-transform: uppercase;
+            margin-bottom: 30pt;
+        }
+
+        .cert-body {
+            padding: 40pt;
+            position: relative;
+            z-index: 10;
+        }
+
+        .cert-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20pt;
+            margin-top: 30pt;
+        }
+
+        .cert-label {
+            font-size: 8pt;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1pt;
+            display: block;
+            margin-bottom: 4pt;
+        }
+
+        .cert-value {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .integrity-box {
+            background: rgba(0, 255, 0, 0.05);
+            border: 1px dashed var(--primary);
+            padding: 15pt;
+            border-radius: 8pt;
+            margin-top: 40pt;
+            font-family: monospace;
+        }
+
+        .signature-section {
+            margin-top: 60pt;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .sig-block {
+            border-top: 1px solid var(--border);
+            width: 200pt;
+            padding-top: 10pt;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="page cert-page">
+        <div class="cert-watermark">VERIFIED EVIDENCE</div>
+        
+        <div class="cert-header">
+            <img src="logo.png" style="width: 120pt; margin-bottom: 20pt;">
+            <h1 class="cert-title">COMPLIANCE CERTIFICATE</h1>
+            <p class="cert-subtitle">Security Vulnerability Validation</p>
+        </div>
+
+        <div class="cert-body">
+            <div class="section">
+                <span class="section-label">Submission Metadata</span>
+                <h2 style="font-size: 24pt;">{{ submission.title }}</h2>
+                <p style="color: var(--text-muted); font-size: 11pt;">
+                    This document certifies that the vulnerability described herein has been validated 
+                    through the HackerScan Pro Zero-Simulation engine and mapped to industry standards.
+                </p>
+
+                <div class="cert-info-grid">
+                    <div>
+                        <span class="cert-label">Researcher</span>
+                        <div class="cert-value">{{ submission.researcher.email }}</div>
+                    </div>
+                    <div>
+                        <span class="cert-label">Target Asset</span>
+                        <div class="cert-value">{{ submission.target_domain }}</div>
+                    </div>
+                    <div>
+                        <span class="cert-label">Severity Level</span>
+                        <div class="cert-value">
+                            <span class="severity-badge bg-{{ submission.severity|lower }}">{{ submission.severity }}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="cert-label">Submission ID</span>
+                        <div class="cert-value" style="font-family: monospace;">{{ submission.id }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section" style="margin-top: 30pt;">
+                <span class="section-label">Compliance Frameworks</span>
+                <div style="display: flex; gap: 15pt;">
+                    {% if submission.compliance_mapping.owasp %}
+                    <div class="glass-card" style="padding: 10pt; flex: 1; margin: 0;">
+                        <span class="cert-label">OWASP Top 10</span>
+                        <div class="cert-value" style="color: var(--primary);">{{ submission.compliance_mapping.owasp }}</div>
+                    </div>
+                    {% endif %}
+                    {% if submission.compliance_mapping.mitre %}
+                    <div class="glass-card" style="padding: 10pt; flex: 1; margin: 0;">
+                        <span class="cert-label">MITRE CWE</span>
+                        <div class="cert-value" style="color: var(--info);">{{ submission.compliance_mapping.mitre }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="integrity-box">
+                <span class="cert-label">Digital Fingerprint (SHA-256)</span>
+                <div style="font-size: 10pt; color: var(--primary); word-break: break-all;">
+                    {{ submission.verification_hash }}
+                </div>
+                <div style="font-size: 6pt; color: var(--text-muted); margin-top: 10pt; text-transform: uppercase;">
+                    This hash ensures the integrity of the evidence. Any alteration to the original submission 
+                    data will invalidate this certificate.
+                </div>
+            </div>
+
+            <div class="signature-section">
+                <div class="sig-block">
+                    <div style="font-size: 10pt; font-weight: 700;">HackerScan Automated Engine</div>
+                    <div style="font-size: 7pt; color: var(--text-muted);">Digital Verification Service</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 8pt; color: var(--text-muted); margin-bottom: 4pt;">Issued On</div>
+                    <div style="font-size: 12pt; font-weight: 700;">{{ submission.created_at|date:"Y-m-d H:i:s" }} UTC</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

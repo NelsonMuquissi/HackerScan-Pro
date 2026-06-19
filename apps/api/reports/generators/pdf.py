@@ -32,6 +32,14 @@ class PDFGenerator:
         return PDFGenerator._render_pdf(html_content)
 
     @staticmethod
+    def generate_bounty_certificate(submission):
+        """
+        Generates a professional compliance certificate for a bounty submission.
+        """
+        html_content = render_to_string("reports/bounty_certificate.html", {"submission": submission})
+        return PDFGenerator._render_pdf(html_content)
+
+    @staticmethod
     def _render_pdf(html_content):
         """Internal method to render HTML to PDF bytes."""
         try:
@@ -45,16 +53,16 @@ class PDFGenerator:
             template_path = os.path.join(settings.BASE_DIR, "reports", "templates", "reports")
             
             return HTML(string=html_content, base_url=template_path).write_pdf()
-        except ImportError as e:
-
+        except (ImportError, OSError) as e:
             logger.error(
                 "WeasyPrint is not available on this host (missing native GTK/Pango libs). "
-                "PDF generation requires a Linux/macOS environment with libgobject-2.0-0. "
+                "PDF generation requires libgobject-2.0-0. "
+                "On Windows, you may need to install GTK3 (e.g. via MSYS2 or GTK-for-Windows). "
                 "Error: %s", e,
             )
             raise RuntimeError(
                 "PDF generation is unavailable on this host. "
-                "Deploy to a Linux environment with GTK/Pango installed."
+                "Deploy to a Linux environment with GTK/Pango installed or install GTK on Windows."
             ) from e
         except Exception as e:
             logger.error("Error rendering PDF: %s", e)

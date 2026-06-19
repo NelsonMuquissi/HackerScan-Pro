@@ -10,6 +10,12 @@ class Webhook(TimestampedModel):
     """
     Outbound webhook configuration for a workspace.
     """
+    class Type(models.TextChoices):
+        GENERIC = 'GENERIC', 'Generic Webhook'
+        SLACK = 'SLACK', 'Slack (Rich Blocks)'
+        JIRA = 'JIRA', 'Jira Issue Creation'
+        SPLUNK = 'SPLUNK', 'Splunk HEC'
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workspace = models.ForeignKey(
         'users.Workspace', 
@@ -21,6 +27,19 @@ class Webhook(TimestampedModel):
     secret_token = models.CharField(
         max_length=128, 
         default=generate_webhook_secret
+    )
+    
+    type = models.CharField(
+        max_length=20,
+        choices=Type.choices,
+        default=Type.GENERIC,
+        help_text="Integration type for payload formatting."
+    )
+    
+    config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Type-specific configuration (e.g. Jira project key, Auth tokens)"
     )
     
     # List of events this webhook is subscribed to (e.g., ["scan.completed", "finding.new"])

@@ -6,7 +6,7 @@ class WebhookSerializer(serializers.ModelSerializer):
         model = Webhook
         fields = [
             'id', 'workspace', 'name', 'url', 'secret_token', 
-            'events', 'is_active', 'last_triggered_at', 
+            'type', 'config', 'events', 'is_active', 'last_triggered_at', 
             'last_status_code', 'created_at'
         ]
         read_only_fields = ['id', 'secret_token', 'last_triggered_at', 'last_status_code', 'created_at']

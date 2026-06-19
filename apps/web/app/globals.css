@@ -41,3 +41,17 @@ input:focus, textarea:focus, select:focus {
   border-color: #00ff00;
   box-shadow: 0 0 5px rgba(0, 255, 0, 0.2);
 }
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(57, 255, 20, 0.1);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(57, 255, 20, 0.3);
+}

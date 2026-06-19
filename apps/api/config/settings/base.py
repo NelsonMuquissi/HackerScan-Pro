@@ -28,7 +28,7 @@ elif (BASE_DIR / ".env.development").exists():
     env.read_env(BASE_DIR / ".env.development")
 
 # Security
-SECRET_KEY = env("SECRET_KEY", default="unsafe-secret-key")
+SECRET_KEY = env("SECRET_KEY", default="unsafe-secret-key-for-local-development-only-32-bytes")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost"])
 
@@ -63,6 +63,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 # ─── AI Engine ───────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
+AI_FP_SUPPRESSION_THRESHOLD = env.float("AI_FP_SUPPRESSION_THRESHOLD", default=0.7)
 
 # ─── Sentry Error Tracking ───────────────────────────────────────────────────
 SENTRY_DSN = env("SENTRY_DSN", default="")
@@ -201,7 +202,7 @@ if _jwt_private_key and _jwt_public_key:
 # ─── CORS ────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:3000", "http://127.0.0.1:3000"],
+    default=["http://localhost:3300", "http://127.0.0.1:3300"],
 )
 
 # ─── Email ───────────────────────────────────────────────────────────────────
@@ -238,13 +239,24 @@ CELERY_TASK_TRACK_STARTED  = True
 CELERY_TASK_TIME_LIMIT     = 600   # 10 min hard limit per scan
 CELERY_TASK_SOFT_TIME_LIMIT = 540  # 9 min soft limit
 
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-stuck-scans-every-10-min": {
+        "task": "scans.cleanup_stuck_scans",
+        "schedule": timedelta(minutes=10),
+    },
+    "verify-audit-log-integrity-hourly": {
+        "task": "users.verify_audit_log_integrity",
+        "schedule": timedelta(hours=1),
+    },
+}
+
 # ─── Stripe ──────────────────────────────────────────────────────────────────
 STRIPE_SECRET_KEY       = env("STRIPE_SECRET_KEY", default="sk_test_placeholder")
 STRIPE_PUBLISHABLE_KEY  = env("STRIPE_PUBLISHABLE_KEY", default="pk_test_placeholder")
 STRIPE_WEBHOOK_SECRET   = env("STRIPE_WEBHOOK_SECRET", default="whsec_placeholder")
 
 # Frontend URL (used for email links, upsell redirects, etc.)
-FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3300")
 
 # ─── Storage (MinIO / S3) ───────────────────────────────────────────────────
 AWS_ACCESS_KEY_ID       = env("AWS_ACCESS_KEY_ID", default="hackscan_admin")

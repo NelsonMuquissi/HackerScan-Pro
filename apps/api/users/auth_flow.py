@@ -3,7 +3,7 @@ Robust Authentication and Authorization Flow using Pydantic and Passlib.
 Designed to be modular and secure, easily integratable into any view logic.
 """
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Dict, Any
 from django.contrib.auth.hashers import make_password, check_password
@@ -67,13 +67,13 @@ class AuthServiceFlow:
     def create_token_pair(data: dict) -> TokenResponseSchema:
         """Create both access and refresh JWT tokens."""
         # Access token
-        access_expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_payload = data.copy()
         access_payload.update({"exp": access_expire, "type": "access"})
         access_token = jwt.encode(access_payload, SECRET_KEY, algorithm=ALGORITHM)
         
         # Refresh token (e.g., 7 days)
-        refresh_expire = datetime.utcnow() + timedelta(days=7)
+        refresh_expire = datetime.now(timezone.utc) + timedelta(days=7)
         refresh_payload = {"user_id": data.get("user_id"), "exp": refresh_expire, "type": "refresh"}
         refresh_token = jwt.encode(refresh_payload, SECRET_KEY, algorithm=ALGORITHM)
 

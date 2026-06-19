@@ -138,6 +138,24 @@ export async function getScan(id: string): Promise<any> {
   return fetchApi<any>(`/scans/${id}/`);
 }
 
+export async function cancelScan(id: string): Promise<any> {
+  return fetchApi<any>(`/scans/${id}/cancel/`, {
+    method: 'POST',
+  });
+}
+
+export async function triggerScan(id: string): Promise<any> {
+  return fetchApi<any>(`/scans/${id}/start/`, {
+    method: 'POST',
+  });
+}
+
+export async function rescanScan(id: string): Promise<any> {
+  return fetchApi<any>(`/scans/${id}/rescan/`, {
+    method: 'POST',
+  });
+}
+
 export async function getFindings(scanId: string): Promise<any[] | PaginatedResponse<any>> {
   return fetchApi<any[] | PaginatedResponse<any>>(`/scans/${scanId}/findings/`);
 }
@@ -164,6 +182,48 @@ export async function deleteReport(id: string): Promise<void> {
   return fetchApi<void>(`/reports/${id}/`, {
     method: 'DELETE',
   });
+}
+
+export async function verifyReportHash(hash: string): Promise<any> {
+  return fetchApi<any>(`/reports/verify/?hash=${hash}`);
+}
+
+export async function getEvidenceVault(): Promise<PaginatedResponse<any>> {
+  return fetchApi<PaginatedResponse<any>>('/scans/evidence-vault/');
+}
+
+export async function logEvidenceAction(itemId: string, action: string, itemType: string = 'SCAN_FINDING', metadata: any = {}): Promise<any> {
+  return fetchApi<any>('/scans/evidence-vault/log/', {
+    method: 'POST',
+    body: JSON.stringify({
+      item_id: itemId,
+      item_type: itemType,
+      action: action,
+      metadata: metadata,
+    }),
+  });
+}
+
+export async function exportEvidenceVault(workspaceId?: string): Promise<Blob> {
+  const endpoint = workspaceId && workspaceId !== 'undefined' 
+    ? `/scans/evidence-vault/export/?workspace_id=${workspaceId}` 
+    : '/scans/evidence-vault/export/';
+    
+  const headers = new Headers();
+  const token = useAuthStore.getState().token;
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Export failed: ${response.status}`);
+  }
+
+  return response.blob();
 }
 
 // Notifications API
@@ -287,10 +347,22 @@ export async function explainFindingAI(findingId: string, express: boolean = fal
   });
 }
 
-export async function remediateFindingAI(findingId: string, express: boolean = false): Promise<{ remediation: string }> {
+export async function remediateFindingAI(findingId: string, express: boolean = false, targetLanguage?: string): Promise<{ remediation: string }> {
   return fetchApi<{ remediation: string }>(`/ai/findings/${findingId}/remediate/`, {
     method: 'POST',
-    body: JSON.stringify({ express }),
+    body: JSON.stringify({ express, target_language: targetLanguage }),
+  });
+}
+
+export async function chatFindingCopilot(
+  findingId: string, 
+  message: string, 
+  history: {role: string, content: string}[], 
+  express: boolean = false
+): Promise<{ reply: string }> {
+  return fetchApi<{ reply: string }>(`/ai/findings/${findingId}/chat/`, {
+    method: 'POST',
+    body: JSON.stringify({ message, history, express }),
   });
 }
 
@@ -298,6 +370,54 @@ export async function getScanAIPrediction(scanId: string, express: boolean = fal
   return fetchApi<{ prediction: string }>(`/ai/scans/${scanId}/prediction/`, {
     method: 'POST',
     body: JSON.stringify({ express }),
+  });
+}
+
+export async function analyzeFalsePositiveAI(findingId: string): Promise<{
+  is_false_positive: boolean;
+  confidence: number;
+  reasoning: string;
+}> {
+  return fetchApi<{
+    is_false_positive: boolean;
+    confidence: number;
+    reasoning: string;
+  }>(`/scans/findings/${findingId}/analyze-fp/`, {
+    method: 'POST',
+  });
+}
+
+export async function submitFindingFeedback(
+  findingId: string, 
+  feedback: 'confirmed_valid' | 'confirmed_fp'
+): Promise<{ message: string; user_verification: string }> {
+  return fetchApi<{ message: string; user_verification: string }>(`/scans/findings/${findingId}/feedback/`, {
+    method: 'POST',
+    body: JSON.stringify({ feedback }),
+  });
+}
+
+export async function verifyFindingAI(findingId: string): Promise<any> {
+  return fetchApi<any>(`/scans/findings/${findingId}/verify/`, {
+    method: 'POST',
+  });
+}
+
+export async function generateFindingPOCAI(findingId: string): Promise<{ poc: string; finding: any }> {
+  return fetchApi<{ poc: string; finding: any }>(`/scans/findings/${findingId}/poc/`, {
+    method: 'POST',
+  });
+}
+
+export async function assessScanRiskAI(scanId: string): Promise<{ analysis: any; scan: any }> {
+  return fetchApi<{ analysis: any; scan: any }>(`/scans/${scanId}/risk/`, {
+    method: 'POST',
+  });
+}
+
+export async function verifyAllFindings(scanId: string): Promise<{ message: string; queued: number; scan_id: string }> {
+  return fetchApi<{ message: string; queued: number; scan_id: string }>(`/scans/${scanId}/verify-all/`, {
+    method: 'POST',
   });
 }
 
@@ -360,6 +480,36 @@ export async function getResearcherSubmissions(): Promise<any[] | PaginatedRespo
 
 export async function verifySubmissionProof(id: string): Promise<any> {
   return fetchApi<any>(`/bounty/submissions/${id}/verify_proof/`, {
+    method: 'POST',
+  });
+}
+
+export async function uploadSubmissionAttachment(id: string, file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers = new Headers();
+  const token = useAuthStore.getState().token;
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/bounty/submissions/${id}/upload_attachment/`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Falha no upload do anexo');
+  }
+
+  return response.json();
+}
+
+export async function generateSubmissionCertificate(id: string): Promise<any> {
+  return fetchApi<any>(`/bounty/submissions/${id}/generate_certificate/`, {
     method: 'POST',
   });
 }
@@ -456,4 +606,207 @@ export async function listAuditLogs(workspaceId: string): Promise<any[]> {
   if (!workspaceId || workspaceId === 'undefined') return [];
   const data = await fetchApi<any[] | PaginatedResponse<any>>(`/workspaces/${workspaceId}/audit-logs/`);
   return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+// Admin API
+export async function adminGetStats(): Promise<any> {
+  return fetchApi<any>('/admin/stats/');
+}
+
+export async function adminListUsers(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/users/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminGetUser(id: string): Promise<any> {
+  return fetchApi<any>(`/admin/users/${id}/`);
+}
+
+export async function adminUpdateUser(id: string, data: any): Promise<any> {
+  return fetchApi<any>(`/admin/users/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminListBountyPrograms(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/bounty/programs/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminListBountySubmissions(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/bounty/submissions/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminListModules(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/marketplace/modules/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function verifySubmissionIntegrity(id: string): Promise<any> {
+  return fetchApi<any>(`/bounty/submissions/${id}/verify_integrity/`);
+}
+
+export async function adminVerifySubmissionIntegrity(id: string): Promise<any> {
+  return fetchApi<any>(`/bounty/admin/submissions/${id}/verify_integrity/`);
+}
+
+export async function getBountyTransparencyLog(page: number = 1): Promise<any[] | PaginatedResponse<any>> {
+  return fetchApi<any[] | PaginatedResponse<any>>(`/bounty/transparency-log/?page=${page}`);
+}
+
+export async function adminCreateModule(data: any): Promise<any> {
+  return fetchApi<any>('/admin/marketplace/modules/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminUpdateModule(id: string, data: any): Promise<any> {
+  return fetchApi<any>(`/admin/marketplace/modules/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminDeleteModule(id: string): Promise<void> {
+  return fetchApi<void>(`/admin/marketplace/modules/${id}/`, {
+    method: 'DELETE',
+  });
+}
+
+export async function adminListWorkspaces(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/workspaces/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminUpdateWorkspace(id: string, data: any): Promise<any> {
+  return fetchApi<any>(`/admin/workspaces/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminDeleteWorkspace(id: string): Promise<void> {
+  return fetchApi<void>(`/admin/workspaces/${id}/`, {
+    method: 'DELETE',
+  });
+}
+
+export async function adminListScans(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/scans/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminListAuditLogs(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/audit-logs/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminGetSystemHealth(): Promise<any> {
+  return fetchApi<any>('/admin/system/health/');
+}
+
+export async function adminExportAuditLogs(format: 'csv' | 'json' = 'csv'): Promise<Blob> {
+  const headers = new Headers();
+  const token = useAuthStore.getState().token;
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/audit-logs/export/?format=${format}`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Export failed: ${response.status}`);
+  }
+
+  return response.blob();
+}
+
+export async function adminRunMaintenance(action: string): Promise<any> {
+  return fetchApi<any>('/admin/system/maintenance/', {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+  });
+}
+
+export async function adminListCTLogs(): Promise<any> {
+  const data = await fetchApi<any>('/admin/ct-logs/');
+  return data;
+}
+
+export async function adminListStrategies(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/admin/strategies/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminUpdateStrategy(id: string, data: any): Promise<any> {
+  return fetchApi<any>(`/admin/strategies/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+// Admin Billing API
+export async function adminListPlans(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/billing/admin/plans/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminCreatePlan(data: any): Promise<any> {
+  return fetchApi<any>('/billing/admin/plans/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminUpdatePlan(id: string, data: any): Promise<any> {
+  return fetchApi<any>(`/billing/admin/plans/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminDeletePlan(id: string): Promise<void> {
+  return fetchApi<void>(`/billing/admin/plans/${id}/`, {
+    method: 'DELETE',
+  });
+}
+
+export async function adminListSubscriptions(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/billing/admin/subscriptions/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminListUsageRecords(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/billing/admin/usage/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminListInvoices(): Promise<any[]> {
+  const data = await fetchApi<any[] | PaginatedResponse<any>>('/billing/admin/invoices/');
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+// Admin Settings API
+export async function adminListSettings(category?: string): Promise<any[]> {
+  const url = category ? `/admin/settings/by_category/?category=${category}` : '/admin/settings/';
+  const data = await fetchApi<any[] | PaginatedResponse<any>>(url);
+  return Array.isArray(data) ? data : (data as any)?.results ?? [];
+}
+
+export async function adminUpdateSetting(key: string, value: any): Promise<any> {
+  return fetchApi<any>(`/admin/settings/${key}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ value }),
+  });
+}
+
+export async function adminBatchUpdateSettings(settings: { key: string; value: any }[]): Promise<any[]> {
+  return fetchApi<any[]>('/admin/settings/batch_update/', {
+    method: 'POST',
+    body: JSON.stringify(settings),
+  });
 }

@@ -1,6 +1,7 @@
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
+import os
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -15,16 +16,30 @@ class StorageService:
             region_name=settings.AWS_S3_REGION_NAME,
         )
         self.bucket_name = settings.AWS_STORAGE_BUCKET_NAME
+        self._bucket_ensured = False
 
     def upload_file(self, file_content, file_name, content_type="application/pdf"):
         """Uploads a file to MinIO/S3 with a local fallback for development."""
+        if not self._bucket_ensured:
+            try:
+                self.ensure_bucket_exists()
+                self._bucket_ensured = True
+            except Exception as e:
+                logger.warning("failed_to_ensure_bucket_exists", error=str(e))
+
         try:
-            # 1. Try S3/MinIO first
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=file_name,
-                Body=file_content,
-                ContentType=content_type,
+            # 🚀 Use upload_fileobj for automatic multipart management (efficient for large logs/PCAPs)
+            import io
+            if isinstance(file_content, str):
+                file_content = file_content.encode()
+            
+            fileobj = io.BytesIO(file_content)
+            
+            self.s3_client.upload_fileobj(
+                fileobj,
+                self.bucket_name,
+                file_name,
+                ExtraArgs={"ContentType": content_type}
             )
             
             # Generate a URL for the file
@@ -36,9 +51,6 @@ class StorageService:
             
             # 2. Local Fallback (Development only or Emergency)
             try:
-                import os # noqa: PLC0415
-                from django.conf import settings # noqa: PLC0415
-                
                 # Use a specific directory for reports in media
                 local_path = os.path.join(settings.BASE_DIR, "media", file_name)
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)

@@ -345,7 +345,7 @@ class AIService:
     # ── 2. generate_remediation_code ───────────────────────────────────
 
     @ai_action(action="remediation_code", cache_ttl=86400)
-    def generate_remediation_code(self, finding_title: str, description: str, evidence: dict = None, **kwargs) -> tuple[str, object]:
+    def generate_remediation_code(self, finding_title: str, description: str, evidence: dict = None, target_language: str = None, **kwargs) -> tuple[str, object]:
         """Gera guia de correção passo a passo com exemplos de código em PT-BR."""
         safe_title = self._redact_pii(finding_title)
         safe_desc = self._redact_pii(description)
@@ -361,8 +361,10 @@ class AIService:
         if not self.has_ai:
             return self._fallback_remediation(safe_title), SimpleNamespace(input_tokens=0, output_tokens=0)
 
+        target_lang_prompt = f" ATENÇÃO: Os exemplos de código DEVEM ser obrigatoriamente em {target_language}." if target_language else ""
+
         prompt = (
-            f"Gere um Plano de Remediação detalhado e acionável para a seguinte falha de segurança.\n\n"
+            f"Gere um Plano de Remediação detalhado e acionável para a seguinte falha de segurança.{target_lang_prompt}\n\n"
             f"Título: {safe_title}\n"
             f"Contexto: {safe_desc}\n"
             f"Evidência Técnica: {evidence_str}\n\n"
@@ -477,10 +479,11 @@ class AIService:
     # ── 5. analyze_false_positive ──────────────────────────────────────
     
     @ai_action(action="analyze_fp", cache_ttl=3600)
-    def analyze_false_positive(self, finding_title: str, description: str, evidence: dict | str) -> tuple[dict, object]:
+    def analyze_false_positive(self, finding_title: str, description: str, evidence: dict | str, 
+                               history: list[dict] | None = None) -> tuple[dict, object]:
         """
-        Analisa se uma descoberta (finding) é um falso positivo com base na evidência técnica.
-        Retorna um dicionário com 'is_false_positive' (bool), 'confidence' (float) e 'reasoning'.
+        Analisa se uma descoberta (finding) é um falso positivo com base na evidência técnica
+        e no histórico de falsos positivos do workspace (aprendizado).
         """
         usage = SimpleNamespace(input_tokens=0, output_tokens=0)
         
@@ -498,10 +501,20 @@ class AIService:
             evidence_str = self._redact_pii(str(evidence))
 
         if not self.has_ai:
-            return {"is_false_positive": False, "confidence": 0.0, "reasoning": "IA indisponível para validação."}, usage
+            return {"is_false_positive": False, "confidence": 1.0, "reasoning": "IA indisponível para validação."}, usage
+
+        history_text = ""
+        if history:
+            history_items = []
+            for h in history[:5]: # Limit to last 5 for context window
+                history_items.append(f"- Título: {h.get('title')}\n  Motivo do Falso Positivo: {h.get('reason')}")
+            history_text = "HISTÓRICO DE FALSOS POSITIVOS CONFIRMADOS NESTE WORKSPACE:\n" + "\n".join(history_items) + "\n\n"
 
         prompt = (
-            "Como um Auditor de Segurança Sênior, analise a seguinte descoberta para determinar se ela é um Falso Positivo.\n\n"
+            "Como um Auditor de Segurança Sênior especializado em redução de ruído, analise a seguinte descoberta "
+            "para determinar se ela é um Falso Positivo.\n\n"
+            f"{history_text}"
+            "NOVA DESCOBERTA PARA ANÁLISE:\n"
             f"Título: {safe_title}\n"
             f"Descrição: {safe_desc}\n"
             f"Evidência Técnica (RAW DATA): {evidence_str}\n\n"
@@ -510,12 +523,12 @@ class AIService:
             "Sua resposta deve ser EXCLUSIVAMENTE um objeto JSON válido no seguinte formato:\n"
             "{\n"
             "  \"is_false_positive\": true/false,\n"
-            "  \"confidence\": 0.0 a 1.0,\n"
+            "  \"confidence\": 0.0 a 1.0 (onde 1.0 é certeza absoluta da sua decisão),\n"
             "  \"reasoning\": \"Explicação técnica concisa em Português\"\n"
             "}"
         )
 
-        result, usage = self._call_llm(prompt, max_tokens=500)
+        result, usage = self._call_llm(prompt, max_tokens=600)
         if result:
             try:
                 json_str = result.strip()
@@ -587,6 +600,195 @@ class AIService:
             f"privilégios e eventualmente explorar as vulnerabilidades mais críticas listadas no relatório.\n\n"
             f"**Prioridade:** Corrigir primeiro as vulnerabilidades de severidade 'Critical' e 'High'."
         )
+
+    # ── 7. generate_vulnerability_poc ───────────────────────────────────
+
+    @ai_action(action="generate_poc", cache_ttl=86400)
+    def generate_vulnerability_poc(self, title: str, description: str, evidence: dict | str = None, 
+                                   request_data: str = None, **kwargs) -> tuple[str, object]:
+        """Gera um Proof of Concept (POC) técnico e seguro para a vulnerabilidade."""
+        safe_title = self._redact_pii(title)
+        safe_desc = self._redact_pii(description)
+        
+        evidence_str = ""
+        if evidence:
+            try:
+                evidence_str = json.dumps(evidence, indent=2) if isinstance(evidence, dict) else str(evidence)
+                evidence_str = self._redact_pii(evidence_str)
+            except Exception:
+                evidence_str = "[Erro ao processar evidência]"
+
+        safe_request = self._redact_pii(request_data or "N/A")
+
+        if not self.has_ai:
+            return f"### [POC Fallback]\n\nPara validar '{safe_title}', utilize a evidência fornecida: {evidence_str[:200]}...", SimpleNamespace(input_tokens=0, output_tokens=0)
+
+        prompt = (
+            f"Como um Pesquisador de Segurança (Bug Hunter), gere um Proof of Concept (POC) técnico para a falha abaixo.\n\n"
+            f"Título: {safe_title}\n"
+            f"Descrição: {safe_desc}\n"
+            f"Requisição Original: {safe_request}\n"
+            f"Evidência de Sucesso: {evidence_str}\n\n"
+            "A POC deve ser estruturada como:\n"
+            "1. **Explicação Técnica**: O que torna esta falha explorável.\n"
+            "2. **Passos para Reproduzir**: Lista numerada de ações.\n"
+            "3. **Payload / Comando**: Forneça o comando curl, script python ou payload específico.\n"
+            "4. **Observação de Segurança**: Lembre o usuário de testar apenas em ambientes autorizados.\n\n"
+            "Sua resposta deve ser estritamente técnica e em Português."
+        )
+
+        result, usage = self._call_llm(prompt, max_tokens=1000)
+        if result:
+            return result, usage
+        return f"POC generation failed. Manual verification required for: {safe_title}", usage
+
+    # ── 8. chat_copilot ─────────────────────────────────────────────────
+
+    @ai_action(action="copilot_chat", cache_ttl=0)
+    def chat_copilot(self, finding_title: str, description: str, evidence: dict | str, 
+                     user_message: str, history: list[dict], **kwargs) -> tuple[str, object]:
+        """
+        Interação de chat em tempo real para ajudar o desenvolvedor a corrigir a vulnerabilidade.
+        """
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        if not self.has_ai:
+            return "O Assistente de IA está indisponível no momento. Por favor, tente novamente mais tarde.", usage
+            
+        safe_title = self._redact_pii(finding_title)
+        safe_desc = self._redact_pii(description)
+        safe_msg = self._redact_pii(user_message)
+        
+        evidence_str = ""
+        if evidence:
+            try:
+                evidence_str = json.dumps(evidence, indent=2) if isinstance(evidence, dict) else str(evidence)
+                evidence_str = self._redact_pii(evidence_str)
+            except Exception:
+                evidence_str = "[Erro ao processar evidência]"
+
+        history_context = ""
+        if history:
+            history_lines = []
+            for h in history[-5:]: # Keep last 5 turns to save context length
+                role = "Usuário" if h.get("role") == "user" else "Copilot"
+                content = self._redact_pii(h.get("content", ""))
+                history_lines.append(f"{role}: {content}")
+            history_context = "\n".join(history_lines) + "\n\n"
+
+        prompt = (
+            f"Você é o AI Remediation Copilot do HackerScan Pro. Você está ajudando um desenvolvedor a corrigir uma vulnerabilidade.\n\n"
+            f"[CONTEXTO DA VULNERABILIDADE]\n"
+            f"Título: {safe_title}\n"
+            f"Descrição: {safe_desc}\n"
+            f"Evidência: {evidence_str}\n\n"
+            f"[HISTÓRICO RECENTE DA CONVERSA]\n"
+            f"{history_context}"
+            f"Mensagem atual do desenvolvedor: {safe_msg}\n\n"
+            "Diretrizes de resposta:\n"
+            "- Seja direto, técnico e foque na solução do problema.\n"
+            "- Se o desenvolvedor pedir código, forneça exemplos seguros (Clean Code) e robustos.\n"
+            "- Responda em Português do Brasil.\n"
+            "- Mantenha a resposta concisa e formatada em Markdown, pois é uma interface de chat."
+        )
+
+        result, usage = self._call_llm(prompt, max_tokens=1000)
+        return result or "Não foi possível gerar uma resposta no momento.", usage
+
+    # ── 6. assess_target_risk ──────────────────────────────────────────
+    
+    @ai_action(action="assess_risk", cache_ttl=3600)
+    def assess_target_risk(self, target_host: str, findings: list[dict]) -> tuple[dict, object]:
+        """
+        Analisa a postura geral de segurança do alvo e retorna um score numérico de risco (0-100) 
+        e uma classificação de risco ("Low", "Medium", "High", "Critical").
+        """
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        
+        safe_host = self._redact_pii(target_host)
+        
+        if not self.has_ai:
+            return {"score": 50.0, "classification": "Medium", "reasoning": "IA indisponível. Risco estimado por severidade padrão."}, usage
+
+        # Prepare summary of findings to avoid hitting token limits
+        findings_summary = []
+        for f in findings:
+            findings_summary.append({
+                "title": f.get("title", "Unknown"),
+                "severity": f.get("severity", "INFO"),
+                "cvss": f.get("cvss_score", 0.0),
+                "epss": f.get("epss_score", 0.0)
+            })
+
+        prompt = (
+            "Como um Especialista em Gestão de Riscos Cibernéticos, avalie a postura de segurança do alvo abaixo.\n\n"
+            f"Alvo: {safe_host}\n"
+            f"Inventário de Vulnerabilidades Resumido:\n{json.dumps(findings_summary, indent=2)}\n\n"
+            "Com base nas falhas detectadas, no potencial de exploração (CVSS/EPSS) e na criticidade do volume de falhas, "
+            "determine o risco global do alvo.\n\n"
+            "Sua resposta deve ser EXCLUSIVAMENTE um objeto JSON válido no seguinte formato:\n"
+            "{\n"
+            "  \"score\": 0.0 a 100.0 (onde 100 é o maior risco),\n"
+            "  \"classification\": \"Low\", \"Medium\", \"High\" ou \"Critical\",\n"
+            "  \"reasoning\": \"Breve explicação em Português sobre o motivo da nota.\"\n"
+            "}"
+        )
+
+        result, usage = self._call_llm(prompt, max_tokens=500)
+        if result:
+            try:
+                json_str = result.strip()
+                if "```json" in json_str:
+                    json_str = json_str.split("```json")[1].split("```")[0].strip()
+                elif "```" in json_str:
+                    json_str = json_str.split("```")[1].split("```")[0].strip()
+                
+                return json.loads(json_str), usage
+            except (json.JSONDecodeError, IndexError):
+                logger.error("AI returned invalid JSON for assess_target_risk")
+        
+        return {"score": 50.0, "classification": "Medium", "reasoning": "Erro ao processar resposta da IA."}, usage
+
+
+    @ai_action(action="compliance_mapping", cache_ttl=86400)
+    def get_compliance_mapping(self, title: str, description: str) -> tuple[dict, object]:
+        """
+        Gera mapeamento de conformidade (OWASP, MITRE, PCI-DSS) para uma vulnerabilidade.
+        """
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0)
+        if not self.has_ai:
+            return {
+                "owasp": "A00:2021-Unknown",
+                "mitre": "T0000",
+                "pci_dss": "N/A"
+            }, usage
+
+        prompt = (
+            f"Como um Auditor de Compliance em Segurança, mapeie a seguinte vulnerabilidade "
+            f"para os padrões OWASP Top 10 (2021), MITRE ATT&CK e PCI-DSS 4.0.\n\n"
+            f"Título: {title}\n"
+            f"Descrição: {description}\n\n"
+            "Sua resposta deve ser EXCLUSIVAMENTE um objeto JSON válido:\n"
+            "{\n"
+            "  \"owasp\": \"AXX:2021-Category Name\",\n"
+            "  \"mitre\": \"TXXXX.XXX (Technique Name)\",\n"
+            "  \"pci_dss\": \"Requirement X.X.X\",\n"
+            "  \"cwe\": \"CWE-XXX\"\n"
+            "}"
+        )
+
+        result, usage = self._call_llm(prompt, max_tokens=400)
+        if result:
+            try:
+                json_str = result.strip()
+                if "```json" in json_str:
+                    json_str = json_str.split("```json")[1].split("```")[0].strip()
+                elif "```" in json_str:
+                    json_str = json_str.split("```")[1].split("```")[0].strip()
+                return json.loads(json_str), usage
+            except Exception:
+                pass
+        
+        return {"owasp": "A00:2021-Unknown", "mitre": "T0000", "pci_dss": "N/A"}, usage
 
 
 ai_service = AIService()

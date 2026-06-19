@@ -2,7 +2,10 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-
+# Ensure project root is on PYTHONPATH
+import pathlib
+BASE_DIR = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BASE_DIR))
 
 def main():
     """Run administrative tasks."""

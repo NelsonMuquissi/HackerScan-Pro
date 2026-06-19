@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Users, 
   Mail, 
@@ -28,7 +28,7 @@ export function TeamContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const loadTeam = async () => {
+  const loadTeam = useCallback(async () => {
     if (!workspaceId) return;
     setLoading(true);
     try {
@@ -41,11 +41,11 @@ export function TeamContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [workspaceId]);
 
   useEffect(() => {
     loadTeam();
-  }, [workspaceId]);
+  }, [loadTeam]);
 
   const handleInvite = async () => {
     if (!workspaceId || !inviteEmail) return;

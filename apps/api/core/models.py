@@ -64,3 +64,20 @@ class SoftDeleteModel(models.Model):
         """
         self.deleted_at = None
         self.save(update_fields=['deleted_at'])
+
+
+class GlobalSetting(TimestampedModel):
+    """
+    System-wide settings stored in the database.
+    """
+    key = models.CharField(max_length=255, unique=True, db_index=True)
+    value = models.JSONField(default=dict)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=100, default='general', db_index=True)
+
+    class Meta:
+        verbose_name = "Global Setting"
+        verbose_name_plural = "Global Settings"
+
+    def __str__(self):
+        return f"{self.key} ({self.category})"

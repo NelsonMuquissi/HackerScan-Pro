@@ -23,6 +23,7 @@ urlpatterns = [
     path("v1/bounty/", include("bounty.urls")),
     path("v1/marketplace/", include("marketplace.urls")),
     path("v1/workspaces/", include("users.urls_workspaces")),
+    path("v1/admin/", include("users.urls_admin")),
 ]
 
 from django.conf import settings

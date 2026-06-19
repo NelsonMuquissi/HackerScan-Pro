@@ -3,7 +3,11 @@ HackScan Pro — Billing URL Configuration.
 """
 from django.urls import path
 
-from . import views, webhooks
+from . import views, webhooks, views_admin
+from rest_framework.routers import DefaultRouter
+
+router = DefaultRouter()
+router.register(r"admin/plans", views_admin.GlobalAdminPlanViewSet, basename="admin-plans")
 
 urlpatterns = [
     # Plans (public)
@@ -23,4 +27,9 @@ urlpatterns = [
 
     # Stripe webhook (no auth — signature verified internally)
     path("webhooks/stripe/", webhooks.stripe_webhook_view, name="billing-stripe-webhook"),
-]
+
+    # Global Admin
+    path("admin/subscriptions/", views_admin.GlobalAdminSubscriptionListView.as_view(), name="admin-subscriptions"),
+    path("admin/usage/", views_admin.GlobalAdminUsageListView.as_view(), name="admin-usage"),
+    path("admin/invoices/", views_admin.GlobalAdminInvoiceListView.as_view(), name="admin-invoices"),
+] + router.urls

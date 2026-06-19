@@ -4,7 +4,9 @@ from .views import (
     PublicProgramViewSet, 
     WorkspaceBountyViewSet, 
     WorkspaceSubmissionViewSet,
-    ResearcherSubmissionViewSet
+    ResearcherSubmissionViewSet,
+    TransparencyLogView,
+    TransparencyLogExportView
 )
 
 router = DefaultRouter()
@@ -14,5 +16,7 @@ router.register(r'workspace-submissions', WorkspaceSubmissionViewSet, basename='
 router.register(r'submissions', ResearcherSubmissionViewSet, basename='bounty-submissions')
 
 urlpatterns = [
+    path('transparency-log/', TransparencyLogView.as_view(), name='bounty-transparency-log'),
+    path('transparency-log/export/', TransparencyLogExportView.as_view(), name='bounty-transparency-log-export'),
     path('', include(router.urls)),
 ]

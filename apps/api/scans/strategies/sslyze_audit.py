@@ -3,7 +3,8 @@ import subprocess
 import json
 import tempfile
 import os
-from typing import List
+import asyncio
+from typing import List, AsyncGenerator
 from .base import BaseScanStrategy, register, FindingData
 from scans.models import Severity
 
@@ -19,8 +20,7 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
     slug = "sslyze_audit"
     name = "SSL/TLS Audit"
 
-    def run(self, target, scan=None) -> List[FindingData]:
-        findings = []
+    async def run_async(self, target: "ScanTarget", scan: "Scan" = None) -> AsyncGenerator[FindingData, None]:
         host = target.host
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
@@ -33,21 +33,27 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                 "--json_out", output_file,
             ]
 
-            logger.info("Running sslyze: %s", " ".join(cmd))
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
+            self.log(scan, f"Starting SSL/TLS audit for {host}...")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
 
-            if result.returncode != 0 and not os.path.exists(output_file):
-                logger.warning("sslyze returned non-zero exit: %s", result.stderr)
-                findings.append(FindingData(
+            if process.returncode != 0 and not os.path.exists(output_file):
+                yield FindingData(
                     title="SSL/TLS Audit Error",
                     description=f"sslyze could not connect to {host}. It may not support HTTPS.",
                     severity=Severity.INFO,
-                    evidence={"error": result.stderr[:1000]},
+                    evidence={"error": stderr.decode()[:1000]},
                     remediation="Verify that the target supports HTTPS on port 443.",
                     poc=f"sslyze {host}",
                     plugin_slug=self.slug
-                ))
-                return findings
+                )
+                return
 
             if os.path.exists(output_file):
                 with open(output_file, "r") as f:
@@ -55,39 +61,47 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                         data = json.loads(f.read())
                     except json.JSONDecodeError:
                         logger.warning("sslyze produced invalid JSON for %s", host)
-                        return findings
+                        return
+
+                    if not isinstance(data, dict):
+                        logger.warning("sslyze produced non-dict JSON for %s", host)
+                        return
 
                     for server_result in data.get("server_scan_results", []):
+                        if not server_result:
+                            continue
                         scan_res = server_result.get("scan_result", {})
                         common_poc = f"sslyze {host}"
 
                         # Heartbleed
-                        heartbleed = scan_res.get("heartbleed", {})
-                        if heartbleed.get("result", {}).get("is_vulnerable_to_heartbleed"):
-                            findings.append(FindingData(
+                        heartbleed = scan_res.get("heartbleed") or {}
+                        hb_res = heartbleed.get("result") or {}
+                        if hb_res.get("is_vulnerable_to_heartbleed"):
+                            yield FindingData(
                                 title="Heartbleed Vulnerability",
                                 severity=Severity.CRITICAL,
                                 description=f"The server at {host} is vulnerable to Heartbleed (CVE-2014-0160).",
                                 remediation="Patch OpenSSL to a version >= 1.0.1g and regenerate all keys/certificates.",
-                                evidence=heartbleed.get("result"),
+                                evidence=hb_res,
                                 cvss_score=7.5,
                                 poc=common_poc,
                                 plugin_slug=self.slug
-                            ))
+                            )
 
                         # OpenSSL CCS injection (CVE-2014-0224)
-                        ccs = scan_res.get("openssl_ccs_injection", {})
-                        if ccs.get("result", {}).get("is_vulnerable_to_ccs_injection"):
-                            findings.append(FindingData(
+                        ccs = scan_res.get("openssl_ccs_injection") or {}
+                        ccs_res = ccs.get("result") or {}
+                        if ccs_res.get("is_vulnerable_to_ccs_injection"):
+                            yield FindingData(
                                 title="OpenSSL CCS Injection Vulnerability",
                                 severity=Severity.HIGH,
                                 description=f"Server at {host} is vulnerable to OpenSSL CCS Injection (CVE-2014-0224).",
                                 remediation="Update OpenSSL to a patched version.",
-                                evidence=ccs.get("result"),
+                                evidence=ccs_res,
                                 cvss_score=6.8,
                                 poc=common_poc,
                                 plugin_slug=self.slug
-                            ))
+                            )
 
                         # Deprecated TLS protocols
                         deprecated_protos = []
@@ -97,13 +111,14 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                             ("tls_1_0_cipher_suites", "TLS 1.0"),
                             ("tls_1_1_cipher_suites", "TLS 1.1"),
                         ]:
-                            proto_result = scan_res.get(proto_key, {})
-                            accepted = proto_result.get("result", {}).get("accepted_cipher_suites", [])
+                            proto_result = scan_res.get(proto_key) or {}
+                            proto_res = proto_result.get("result") or {}
+                            accepted = proto_res.get("accepted_cipher_suites") or []
                             if accepted:
                                 deprecated_protos.append(proto_name)
 
                         if deprecated_protos:
-                            findings.append(FindingData(
+                            yield FindingData(
                                 title="Deprecated TLS/SSL Protocols Enabled",
                                 severity=Severity.MEDIUM,
                                 description=(
@@ -119,31 +134,33 @@ class SSLyzeAuditStrategy(BaseScanStrategy):
                                 cvss_score=5.3,
                                 poc=common_poc,
                                 plugin_slug=self.slug
-                            ))
+                            )
 
-                        # If no issues found, report a clean audit
-                        if not findings:
-                            findings.append(FindingData(
-                                title="SSL/TLS Audit Passed",
-                                description=f"No critical SSL/TLS issues found on {host}.",
-                                severity=Severity.INFO,
-                                evidence={"status": "clean", "host": host},
-                                remediation="Continue monitoring certificate expiry and protocol support.",
-                                poc=common_poc,
-                                plugin_slug=self.slug
-                            ))
+        except Exception as e:
+            logger.error(f"SSLyze error: {e}")
+            self.log(scan, f"Engine error: {str(e)}")
         finally:
             if os.path.exists(output_file):
                 os.remove(output_file)
 
-        return findings
+    async def verify_async(self, finding: "Finding") -> bool:
+        """
+        Verify by re-running sslyze for the specific target asynchronously.
+        """
+        from asgiref.sync import sync_to_async
+        scan = await sync_to_async(lambda: finding.scan)()
+        target = await sync_to_async(lambda: scan.target)()
 
-    def verify(self, finding: "Finding") -> bool:
-        """
-        Verify by re-running sslyze for the specific target.
-        """
-        host = finding.scan.target.host
-        results = self.run(finding.scan.target)
+        found = False
+        async for r in self.run_async(target):
+            if r.title == finding.title:
+                found = True
+                break
         
-        # If any finding in the new results has the same title, it's verified
-        return any(r.title == finding.title for r in results)
+        if found:
+            finding.is_verified = True
+            from asgiref.sync import sync_to_async
+            await sync_to_async(finding.save)()
+            return True
+            
+        return False

@@ -11,6 +11,7 @@ class ScanTargetSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "host", "target_type", "description",
             "is_verified", "tags", "scan_count", "created_at", "updated_at",
+            "ml_risk_score", "ml_risk_classification",
         ]
         read_only_fields = ["id", "is_verified", "scan_count", "created_at", "updated_at"]
 
@@ -40,9 +41,11 @@ class FindingSerializer(serializers.ModelSerializer):
         fields = [
             "id", "plugin_slug", "severity", "status", "title", "description",
             "remediation", "evidence", "cvss_score", "epss_score",
-            "fingerprint", "is_false_positive", "ai_reasoning", "first_seen_at", "last_seen_at",
+            "fingerprint", "is_false_positive", "ai_confidence", "ai_reasoning",
+            "user_verification", "first_seen_at", "last_seen_at",
             "resolved_at", "created_at", "ai_explanation", "ai_remediation",
-            "request", "response", "poc", "is_verified",
+            "request", "response", "poc", "is_verified", "screenshot",
+            "compliance_mapping", "visual_proof_b64", "technical_details",
         ]
         read_only_fields = fields
 
@@ -66,16 +69,18 @@ class ScheduledScanSerializer(serializers.ModelSerializer):
 
 
 class ScanListSerializer(serializers.ModelSerializer):
+    target_id   = serializers.UUIDField(source="target.id", read_only=True)
     target_host = serializers.CharField(source="target.host", read_only=True)
     duration    = serializers.FloatField(source="duration_seconds", read_only=True)
 
     class Meta:
         model  = Scan
         fields = [
-            "id", "target_host", "status", "plugin_ids",
+            "id", "target_id", "target_host", "status", "plugin_ids",
             "total_findings", "critical_count", "high_count",
             "medium_count", "low_count", "info_count",
             "started_at", "finished_at", "duration", "created_at",
+            "ml_risk_score", "ml_risk_classification", "report_file",
         ]
         read_only_fields = fields
 

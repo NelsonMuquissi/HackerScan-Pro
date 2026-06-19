@@ -21,6 +21,7 @@ class ReportCreateView(WorkspaceScopedViewMixin, views.APIView):
         from users.models import UserRole  # noqa: PLC0415
         is_global_admin = request.user.role in [UserRole.ADMIN, UserRole.SUPERADMIN]
         
+        wid = self.get_workspace_id(request)
         if is_global_admin:
             scan = get_object_or_404(Scan, id=scan_id)
         else:
@@ -83,5 +84,27 @@ class ReportViewSet(WorkspaceScopedViewMixin,
         wid = self.get_workspace_id(self.request)
         return Report.objects.filter(scan__target__workspace_id=wid).select_related("scan", "scan__target")
 
-# Detailed view is now handled by ReportViewSet.
-# Removed ReportDetailView to avoid redundancy.
+
+class ReportVerificationView(views.APIView):
+    """
+    GET /v1/reports/verify/?hash=<sha256>
+    Verify report integrity.
+    """
+    permission_classes = []  # Publicly accessible for audit verification
+
+    def get(self, request):
+        report_hash = request.query_params.get('hash')
+        if not report_hash:
+            return Response({"error": "Hash parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        report = get_object_or_404(Report, integrity_hash=report_hash)
+        
+        return Response({
+            "verified": True,
+            "report_id": str(report.id),
+            "scan_id": str(report.scan.id),
+            "target": report.scan.target.host,
+            "timestamp": report.created_at,
+            "type": report.type,
+            "format": report.format
+        })

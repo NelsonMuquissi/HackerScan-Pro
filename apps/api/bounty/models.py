@@ -69,6 +69,15 @@ class BountySubmission(models.Model):
     proof_verified = models.BooleanField(default=False)
     verified_at = models.DateTimeField(null=True, blank=True)
     
+    # Evidence Vault Fields (Auditability)
+    visual_proof_b64 = models.TextField(blank=True, null=True, help_text=_("Screenshot of the vulnerability provided by researcher"))
+    technical_details = models.JSONField(default=dict, blank=True, help_text=_("Structured technical artifacts for audit trail"))
+    compliance_mapping = models.JSONField(default=dict, blank=True, help_text=_("Mapping to security standards (OWASP, MITRE, etc.)"))
+    verification_hash = models.CharField(max_length=64, blank=True, help_text=_("SHA-256 fingerprint for audit integrity"))
+    
+    # Certificates & Audit Reports
+    compliance_certificate = models.FileField(upload_to='certificates/', null=True, blank=True, help_text=_("Generated PDF compliance certificate"))
+    
     # Metadata
     internal_notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -79,3 +88,44 @@ class BountySubmission(models.Model):
 
     def __str__(self):
         return f"[{self.severity}] {self.title} by {self.researcher.email}"
+
+    def verify_integrity(self):
+        """
+        Verify that the submission data matches the digital fingerprint.
+        Returns True if integrity is preserved.
+        """
+        import hashlib
+        import json
+        
+        # We must use a deterministic way to serialize JSON fields for hashing
+        compliance_str = json.dumps(self.compliance_mapping, sort_keys=True)
+        
+        raw_data = f"{self.researcher_id}:{self.program_id}:{self.title}:{self.target_domain}:{self.description}:{compliance_str}"
+        expected_hash = hashlib.sha256(raw_data.encode()).hexdigest()
+        return self.verification_hash == expected_hash
+
+    def save(self, *args, **kwargs):
+        if not self.verification_hash:
+            import hashlib
+            import json
+            # Create a unique fingerprint for this submission including all technical data
+            compliance_str = json.dumps(self.compliance_mapping, sort_keys=True)
+            raw_data = f"{self.researcher_id}:{self.program_id}:{self.title}:{self.target_domain}:{self.description}:{compliance_str}"
+            self.verification_hash = hashlib.sha256(raw_data.encode()).hexdigest()
+        super().save(*args, **kwargs)
+
+class BountyAttachment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    submission = models.ForeignKey(BountySubmission, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='evidence/')
+    filename = models.CharField(max_length=255)
+    file_type = models.CharField(max_length=100, help_text=_("MIME type or category (PCAP, LOG, BIN)"))
+    file_size = models.BigIntegerField()
+    
+    # Integrity for each attachment
+    file_hash = models.CharField(max_length=64, help_text=_("SHA-256 hash of the file content"))
+    
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.filename} for {self.submission.id}"

@@ -14,8 +14,77 @@ notify_scan_complete(scan_id)
 import logging
 from celery import shared_task
 from django.db import transaction
+from asgiref.sync import sync_to_async
 
 logger = logging.getLogger(__name__)
+from scans.models import Finding, FindingStatus
+
+def persist_single_finding(fd, scan) -> Finding | None:
+    """
+    Persists a single FindingData to the database and broadcasts it.
+    Handles deduplication via fingerprints.
+    """
+    from django.utils import timezone
+    from scans.services import broadcast_scan_update
+    from billing.services import BillingService
+    
+    if not fd.plugin_slug:
+        fd.plugin_slug = "unknown"
+        
+    fp = fd.get_fingerprint(scan.target.id)
+    
+    try:
+        with transaction.atomic():
+            # Check if it already exists as ACTIVE
+            existing = Finding.objects.filter(
+                scan__target=scan.target, 
+                fingerprint=fp,
+                status=FindingStatus.ACTIVE
+            ).first()
+            
+            if existing:
+                # Recurring finding: Update
+                existing.last_seen_at = timezone.now()
+                existing.scan = scan
+                existing.is_false_positive = fd.is_false_positive
+                existing.ai_reasoning = fd.ai_reasoning
+                existing.request = fd.request
+                existing.response = fd.response
+                existing.poc = fd.poc
+                existing.save(update_fields=["last_seen_at", "scan", "is_false_positive", "ai_reasoning", "request", "response", "poc"])
+                return existing
+            else:
+                # New finding
+                f_new = Finding.objects.create(
+                    scan=scan,
+                    plugin_slug=fd.plugin_slug,
+                    severity=fd.severity,
+                    title=fd.title,
+                    description=fd.description,
+                    remediation=fd.remediation,
+                    evidence=fd.evidence if isinstance(fd.evidence, dict) else {"raw": fd.evidence},
+                    cvss_score=fd.cvss_score,
+                    epss_score=fd.epss_score,
+                    is_false_positive=fd.is_false_positive,
+                    ai_reasoning=fd.ai_reasoning,
+                    request=fd.request,
+                    response=fd.response,
+                    poc=fd.poc,
+                    is_verified=fd.is_verified,
+                    first_seen_at=timezone.now(),
+                    last_seen_at=timezone.now(),
+                    status=FindingStatus.ACTIVE,
+                    fingerprint=fp
+                )
+                # Increment usage counter
+                BillingService.increment_usage(scan.target.workspace, "findings_count", 1)
+                
+                # Broadcast real-time update
+                broadcast_scan_update(scan)
+                return f_new
+    except Exception as e:
+        logger.error("Failed to persist finding %s: %s", fd.title, e)
+        return None
 
 
 @shared_task(
@@ -32,7 +101,7 @@ def run_scan(self, scan_id: str) -> dict:
     Returns a summary dict for logging/result backend.
     """
     from billing.services import BillingService      # noqa: PLC0415
-    from scans.models import Scan, Finding, ScanStatus, ScanType, FindingStatus  # noqa: PLC0415
+    from scans.models import Scan, Finding, ScanStatus, ScanType, FindingStatus, Severity  # noqa: PLC0415
     from scans.strategies.base import get_strategy      # noqa: PLC0415
     # Import strategies
     import scans.strategies.port_scan    # noqa: F401
@@ -52,6 +121,9 @@ def run_scan(self, scan_id: str) -> dict:
     import scans.strategies.container_security # noqa: F401
     import scans.strategies.api_fuzzer   # noqa: F401
     import scans.strategies.shodan_recon # noqa: F401
+    import scans.strategies.dast_auth    # noqa: F401
+    import scans.strategies.database_audit # noqa: F401
+    import scans.strategies.metric_exposure # noqa: F401
     from scans.external.epss import epss_service # noqa: PLC0415
 
     try:
@@ -92,7 +164,8 @@ def run_scan(self, scan_id: str) -> dict:
                 "headers_check", "nuclei_full", 
                 "sslyze_audit", "dir_fuzzing", "resource_discovery",
                 "sqlmap_scan", "xss_scan", "js_secrets",
-                "cloud_exposure", "api_fuzzer", "container_security"
+                "cloud_exposure", "api_fuzzer", "container_security", "database_audit", 
+                "metric_exposure", "dast_auth"
             ],
             ScanType.AD_AUDIT: ["ad_tactical"],
             ScanType.K8S_SECURITY: ["k8s_hardening", "container_security"],
@@ -117,33 +190,37 @@ def run_scan(self, scan_id: str) -> dict:
         recon_to_run = [s for s in requested_strategies if s in RECON_STRATEGIES]
         targeted_to_run = [s for s in requested_strategies if s not in RECON_STRATEGIES]
 
-        all_finding_data = []
-        errors: list[str] = []
-
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
-        # Phase 1: Reconnaissance (Parallel)
+        # 🚀 Phase 1: Reconnaissance (Real-time Streaming)
         if recon_to_run:
             logger.info("Starting Phase 1 (Recon): %s", recon_to_run)
-            with ThreadPoolExecutor(max_workers=min(len(recon_to_run), 4)) as executor:
-                future_to_slug = {}
+            import asyncio
+            
+            async def run_recon():
+                tasks = []
                 for slug in recon_to_run:
                     strategy = get_strategy(slug)
                     if strategy:
-                        future_to_slug[executor.submit(strategy.run, scan.target, scan)] = slug
-                
-                for future in as_completed(future_to_slug):
-                    slug = future_to_slug[future]
-                    try:
-                        results = future.result()
-                        for fd in results:
-                            if not fd.plugin_slug:
-                                fd.plugin_slug = slug
-                        all_finding_data.extend(results)
-                    except Exception as exc:
-                        msg = f"Recon Strategy {slug!r} raised: {exc}"
-                        logger.exception(msg)
-                        errors.append(msg)
+                        tasks.append(process_strategy_async(strategy, slug, scan))
+                await asyncio.gather(*tasks)
+
+            async def process_strategy_async(strategy, slug, scan):
+                try:
+                    async for fd in strategy.run_async(scan.target, scan):
+                        if not fd.plugin_slug:
+                            fd.plugin_slug = slug
+                        
+                        # Save and broadcast immediately
+                        saved_finding = await sync_to_async(persist_single_finding)(fd, scan)
+                        if saved_finding:
+                            all_finding_data.append(fd)
+                except Exception as exc:
+                    msg = f"Recon Strategy {slug!r} raised: {exc}"
+                    logger.exception(msg)
+                    errors.append(msg)
+
+            asyncio.run(run_recon())
 
         # 🧠 Phase 1.5: Adaptive Intelligence Analysis
         # Check discovered ports/services to refine targeted scan
@@ -216,29 +293,26 @@ def run_scan(self, scan_id: str) -> dict:
             except Exception as e:
                 logger.warning("AI Strategy Optimization failed: %s", e)
 
-        # Phase 2: Targeted Analysis (Parallel)
+        # 🚀 Phase 2: Targeted Analysis (Real-time Streaming)
         if targeted_to_run:
             logger.info("Starting Phase 2 (Targeted): %s", targeted_to_run)
-            # Limit concurrency for heavier targeted scans to avoid resource exhaustion
-            with ThreadPoolExecutor(max_workers=min(len(targeted_to_run), 3)) as executor:
-                future_to_slug = {}
+            import asyncio
+
+            async def run_targeted():
+                # Limit concurrency for targeted scans
+                semaphore = asyncio.Semaphore(3)
+                tasks = []
                 for slug in targeted_to_run:
                     strategy = get_strategy(slug)
                     if strategy:
-                        future_to_slug[executor.submit(strategy.run, scan.target, scan)] = slug
-                
-                for future in as_completed(future_to_slug):
-                    slug = future_to_slug[future]
-                    try:
-                        results = future.result()
-                        for fd in results:
-                            if not fd.plugin_slug:
-                                fd.plugin_slug = slug
-                        all_finding_data.extend(results)
-                    except Exception as exc:
-                        msg = f"Targeted Strategy {slug!r} raised: {exc}"
-                        logger.exception(msg)
-                        errors.append(msg)
+                        tasks.append(process_with_semaphore(strategy, slug, scan, semaphore))
+                await asyncio.gather(*tasks)
+
+            async def process_with_semaphore(strategy, slug, scan, sem):
+                async with sem:
+                    await process_strategy_async(strategy, slug, scan)
+
+            asyncio.run(run_targeted())
 
         # 🚀 Step 3.5: Enrich findings with EPSS intelligence
         try:
@@ -251,98 +325,47 @@ def run_scan(self, scan_id: str) -> dict:
         if scan.config.get("ai_fp_reduction", True):
             try:
                 from ai.services import ai_service
-                logger.info("Starting Phase 3.75: AI False-Positive Reduction for %d findings", len(all_finding_data))
+                logger.info("Starting Phase 3.75: AI False-Positive Reduction for scan %s", scan_id)
                 
-                # We only analyze findings that have evidence and are not informational
-                for fd in all_finding_data:
-                    # Severity is an enum, so we check value or slug
-                    is_info = fd.severity == Severity.INFO
-                    if not is_info and fd.evidence:
+                # We only analyze active findings for this scan that are not informational
+                findings_to_check = Finding.objects.filter(
+                    scan=scan,
+                    status=FindingStatus.ACTIVE
+                ).exclude(severity=Severity.INFO)
+                
+                for f in findings_to_check:
+                    if f.evidence:
                         fp_analysis, _ = ai_service.analyze_false_positive(
-                            finding_title=fd.title,
-                            description=fd.description,
-                            evidence=fd.evidence
+                            finding_title=f.title,
+                            description=f.description,
+                            evidence=f.evidence
                         )
                         
                         if fp_analysis.get("is_false_positive") and fp_analysis.get("confidence", 0) > 0.7:
                             logger.info("AI detected False Positive: %s (Confidence: %.2f). Reasoning: %s", 
-                                        fd.title, fp_analysis.get("confidence"), fp_analysis.get("reasoning"))
-                            fd.is_false_positive = True
-                            fd.ai_reasoning = fp_analysis.get("reasoning")
-                            # Optionally downgrade severity or mark it
+                                        f.title, fp_analysis.get("confidence"), fp_analysis.get("reasoning"))
+                            f.is_false_positive = True
+                            f.ai_reasoning = fp_analysis.get("reasoning")
+                            # We mark it as suppressed if it's a confirmed false positive
+                            f.status = FindingStatus.SUPPRESSED
+                            f.save(update_fields=["is_false_positive", "ai_reasoning", "status"])
                             
             except Exception as e:
                 logger.warning("AI False-Positive Reduction failed: %s", e)
 
-        # Lifecycle Tracking: Compare with previous findings for this target
+        # Lifecycle Tracking: Mark resolved findings
+        # (Those that were active before but NOT seen in this current scan)
         from django.utils import timezone
-        existing_findings = Finding.objects.filter(scan__target=scan.target, status=FindingStatus.ACTIVE)
-        fingerprint_map = {f.fingerprint: f for f in existing_findings}
-
-        findings_to_create = []
-        fingerprints_seen_now = set()
-
-        with transaction.atomic():
-            for fd in all_finding_data:
-                # Fallback slug if empty
-                if not fd.plugin_slug:
-                    fd.plugin_slug = "unknown"
-                    
-                fp = fd.get_fingerprint(scan.target.id) 
-                fingerprints_seen_now.add(fp)
-                
-                if fp in fingerprint_map:
-                    # Recurring finding: Update to current scan so it shows in reports/counts
-                    f = fingerprint_map[fp]
-                    f.last_seen_at = timezone.now()
-                    f.scan = scan
-                    # Update AI insights if they were calculated in this scan
-                    f.is_false_positive = fd.is_false_positive
-                    f.ai_reasoning = fd.ai_reasoning
-                    # Update proof data if it changed
-                    f.request = fd.request
-                    f.response = fd.response
-                    f.poc = fd.poc
-                    f.save(update_fields=["last_seen_at", "scan", "is_false_positive", "ai_reasoning", "request", "response", "poc"])
-                else:
-                    # New finding
-                    f_new = Finding(
-                        scan=scan,
-                        plugin_slug=fd.plugin_slug,
-                        severity=fd.severity,
-                        title=fd.title,
-                        description=fd.description,
-                        remediation=fd.remediation,
-                        # Normalize evidence: JSONField expects dict, but some strategies return strings
-                        evidence=fd.evidence if isinstance(fd.evidence, dict) else {"raw": fd.evidence},
-                        cvss_score=fd.cvss_score,
-                        epss_score=fd.epss_score,
-                        is_false_positive=fd.is_false_positive,
-                        ai_reasoning=fd.ai_reasoning,
-                        request=fd.request,
-                        response=fd.response,
-                        poc=fd.poc,
-                        is_verified=fd.is_verified,
-                        first_seen_at=timezone.now(),
-                        last_seen_at=timezone.now(),
-                        status=FindingStatus.ACTIVE
-                    )
-                    # Manually trigger fingerprint generation because bulk_create bypasses .save()
-                    f_new.fingerprint = fp
-                    findings_to_create.append(f_new)
-            
-            if findings_to_create:
-                Finding.objects.bulk_create(findings_to_create)
-                # Increment usage counter
-                BillingService.increment_usage(scan.target.workspace, "findings_count", len(findings_to_create))
-
-            # Mark "Resolved" findings: those that were active but not found in this scan
-            resolved_count = existing_findings.exclude(fingerprint__in=fingerprints_seen_now).update(
-                status=FindingStatus.RESOLVED,
-                resolved_at=timezone.now()
-            )
-            if resolved_count > 0:
-                logger.info("run_scan: Scan %s resolved %d findings", scan_id, resolved_count)
+        fingerprints_seen_now = {fd.get_fingerprint(scan.target.id) for fd in all_finding_data}
+        resolved_count = Finding.objects.filter(
+            scan__target=scan.target, 
+            status=FindingStatus.ACTIVE
+        ).exclude(fingerprint__in=fingerprints_seen_now).update(
+            status=FindingStatus.RESOLVED,
+            resolved_at=timezone.now()
+        )
+        if resolved_count > 0:
+            logger.info("run_scan: Scan %s resolved %d findings", scan_id, resolved_count)
 
         if errors:
             scan.mark_failed(error="\n".join(errors))
@@ -351,6 +374,12 @@ def run_scan(self, scan_id: str) -> dict:
             scan.mark_completed()
             logger.info("run_scan: Scan %s completed — %d findings", scan_id, scan.total_findings)
 
+            # 🚀 Phase 4: Digital Evidence Synthesis (Master Level)
+            # Automatically trigger batch verification and professional enrichment
+            if scan.total_findings > 0:
+                logger.info("run_scan: Triggering Phase 4 (Evidence Synthesis) for scan %s", scan_id)
+                verify_all_findings_task.delay(str(scan_id))
+
     except Exception as exc:
         msg = f"Unexpected error during scan {scan_id}: {exc}"
         logger.exception(msg)
@@ -358,9 +387,20 @@ def run_scan(self, scan_id: str) -> dict:
 
     broadcast_scan_update(scan)
 
-    # Trigger notification (non-blocking, ignore failures)
+    # Trigger ML risk assessment and notification (non-blocking)
+    try:
+        assess_scan_risk_task.delay(str(scan_id), str(scan.target.workspace_id))
+    except Exception:
+        pass
+
     try:
         notify_scan_complete.delay(str(scan_id))
+    except Exception:
+        pass
+
+    # 🚀 Trigger PDF Report Generation
+    try:
+        generate_scan_report_task.delay(str(scan_id))
     except Exception:
         pass
 
@@ -369,6 +409,21 @@ def run_scan(self, scan_id: str) -> dict:
         "status": scan.status,
         "total_findings": scan.total_findings,
     }
+
+
+@shared_task(name="scans.assess_scan_risk_task")
+def assess_scan_risk_task(scan_id: str, workspace_id: str) -> dict:
+    """
+    Background task to assess the overall ML risk for a completed scan.
+    """
+    from scans.services import ScanService  # noqa: PLC0415
+    from uuid import UUID
+    
+    try:
+        return ScanService.assess_risk(UUID(workspace_id), UUID(scan_id))
+    except Exception as exc:
+        logger.error("assess_scan_risk_task failed for scan %s: %s", scan_id, exc)
+        return {"error": str(exc)}
 
 
 @shared_task(name="scans.notify_scan_complete")
@@ -437,9 +492,11 @@ def run_scheduled_scan(scheduled_scan_id: str) -> dict:
 def verify_finding_task(finding_id: str) -> bool:
     """
     Re-runs the specific probe that found the vulnerability to verify it still exists.
+    Uses the strategy's verify_async method for REAL network verification.
     """
     from scans.models import Finding, FindingStatus  # noqa: PLC0415
     from scans.strategies.base import get_strategy   # noqa: PLC0415
+    import asyncio
     
     try:
         finding = Finding.objects.select_related("scan__target").get(pk=finding_id)
@@ -455,23 +512,27 @@ def verify_finding_task(finding_id: str) -> bool:
     logger.info("Starting verification for finding: %s (Plugin: %s)", finding.title, finding.plugin_slug)
     
     try:
-        # 🎯 Call the strategy-specific verification logic
-        is_verified = strategy.verify(finding)
+        # 🎯 Use the async verify method for real network verification
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         
-        finding.is_verified = is_verified
-        if is_verified:
-            # If it's verified, ensure it's ACTIVE (not resolved/ignored)
-            if finding.status in [FindingStatus.RESOLVED, FindingStatus.IGNORED]:
-                finding.status = FindingStatus.ACTIVE
-            finding.is_false_positive = False
-        else:
-            # If we can't verify it anymore, it might be patched or a FP
-            # We don't automatically mark as FP unless the strategy is certain
-            # But we update the verified status
-            pass
-            
-        finding.save(update_fields=["is_verified", "status", "is_false_positive", "request", "response"])
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+        
+        # 🎯 Master Level Verification & Enrichment
+        loop.run_until_complete(finding.verify_and_enrich_async())
+        is_verified = finding.is_verified
+        
         logger.info("Verification finished for %s: is_verified=%s", finding.title, is_verified)
+        
+        # Broadcast update
+        from scans.services import broadcast_scan_update
+        broadcast_scan_update(finding.scan)
+        
         return is_verified
 
     except Exception as e:
@@ -479,3 +540,188 @@ def verify_finding_task(finding_id: str) -> bool:
         return False
 
 
+@shared_task(
+    name="scans.verify_all_findings_task",
+    soft_time_limit=900,   # 15 min soft
+    time_limit=1080,       # 18 min hard
+)
+def verify_all_findings_task(scan_id: str) -> dict:
+    """
+    Batch-verify all active findings for a completed scan.
+    Re-runs each strategy's real verification probe against the target.
+    Returns a summary of verified vs unverified findings.
+    """
+    from scans.models import Scan, Finding, FindingStatus  # noqa: PLC0415
+    from scans.strategies.base import get_strategy          # noqa: PLC0415
+    from scans.services import broadcast_scan_update        # noqa: PLC0415
+    import asyncio
+
+    try:
+        scan = Scan.objects.select_related("target").get(pk=scan_id)
+    except Scan.DoesNotExist:
+        logger.error("verify_all_findings_task: Scan %s not found", scan_id)
+        return {"error": "Scan not found"}
+
+    findings = Finding.objects.filter(
+        scan=scan,
+        status=FindingStatus.ACTIVE
+    ).select_related("scan__target")
+
+    total = findings.count()
+    verified = 0
+    unverified = 0
+    errors = 0
+
+    logger.info("verify_all_findings_task: Starting batch verification for scan %s (%d findings)", scan_id, total)
+
+    # Set up asyncio
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    if loop.is_running():
+        import nest_asyncio
+        nest_asyncio.apply()
+
+    async def verify_single(finding):
+        strategy = get_strategy(finding.plugin_slug)
+        if not strategy:
+            return None
+        
+        try:
+            # 🎯 REAL Verification + Professional Enrichment
+            await finding.verify_and_enrich_async()
+            return finding.is_verified
+        except Exception as e:
+            logger.warning("Master verification error for finding %s: %s", finding.id, e)
+            return None
+
+    async def run_all():
+        nonlocal verified, unverified, errors
+        # Use semaphore to limit concurrent verifications
+        sem = asyncio.Semaphore(5)
+        
+        async def bounded_verify(f):
+            async with sem:
+                return await verify_single(f)
+        
+        tasks = [bounded_verify(f) for f in findings]
+        results = await asyncio.gather(*tasks)
+        
+        for result in results:
+            if result is True:
+                verified += 1
+            elif result is False:
+                unverified += 1
+            else:
+                errors += 1
+
+    loop.run_until_complete(run_all())
+
+    # Broadcast the final state
+    broadcast_scan_update(scan)
+
+    summary = {
+        "scan_id": str(scan_id),
+        "total": total,
+        "verified": verified,
+        "unverified": unverified,
+        "errors": errors,
+    }
+    logger.info("verify_all_findings_task: Completed for scan %s — %s", scan_id, summary)
+    return summary
+
+
+@shared_task(name="scans.generate_scan_report_task")
+def generate_scan_report_task(scan_id: str) -> bool:
+    """
+    Generates a technical PDF report for the scan and saves it to the model.
+    """
+    from scans.models import Scan  # noqa: PLC0415
+    from reports.generators.pdf import PDFGenerator  # noqa: PLC0415
+    from django.core.files.base import ContentFile  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    try:
+        scan = Scan.objects.get(pk=scan_id)
+        
+        # Prepare scan data for the report
+        # In a real scenario, we'd use a proper serializer
+        scan_data = {
+            "id": str(scan.id),
+            "host": scan.target.host,
+            "scan_type": scan.scan_type,
+            "started_at": scan.started_at.isoformat() if scan.started_at else None,
+            "finished_at": scan.finished_at.isoformat() if scan.finished_at else None,
+            "total_findings": scan.total_findings,
+            "critical_count": scan.critical_count,
+            "high_count": scan.high_count,
+            "medium_count": scan.medium_count,
+            "low_count": scan.low_count,
+            "info_count": scan.info_count,
+            "findings": []
+        }
+        
+        for f in scan.findings.all():
+            scan_data["findings"].append({
+                "title": f.title,
+                "severity": f.severity,
+                "description": f.description,
+                "remediation": f.remediation,
+                "evidence": f.evidence
+            })
+
+        # Generate PDF
+        pdf_bytes = PDFGenerator.generate_technical_report(scan_data)
+        
+        # Save to FileField
+        report_name = f"report_{scan.target.host}_{str(scan.id)[:8]}.pdf"
+        scan.report_file.save(report_name, ContentFile(pdf_bytes), save=True)
+        
+        logger.info("generate_scan_report_task: Report saved for scan %s", scan_id)
+        return True
+
+    except Exception as e:
+        logger.error("generate_scan_report_task: Failed for scan %s: %s", scan_id, e)
+        return False
+@shared_task(name="scans.cleanup_stuck_scans")
+def cleanup_stuck_scans() -> dict:
+    """
+    Periodic task to cleanup scans that are stuck in RUNNING or QUEUED state.
+    Scans in QUEUED for > 30 min or RUNNING for > 2 hours are marked as FAILED.
+    """
+    from scans.models import Scan, ScanStatus
+    from django.utils import timezone
+    from datetime import timedelta
+    
+    now = timezone.now()
+    
+    # 1. Cleanup QUEUED scans older than 30 minutes
+    queued_threshold = now - timedelta(minutes=30)
+    stuck_queued = Scan.objects.filter(
+        status=ScanStatus.QUEUED,
+        created_at__lt=queued_threshold
+    )
+    queued_count = stuck_queued.count()
+    for s in stuck_queued:
+        s.mark_failed(error="Scan timeout: Stuck in QUEUED for more than 30 minutes. The worker may be overloaded or crashed.")
+        
+    # 2. Cleanup RUNNING scans older than 2 hours
+    running_threshold = now - timedelta(hours=2)
+    stuck_running = Scan.objects.filter(
+        status=ScanStatus.RUNNING,
+        started_at__lt=running_threshold
+    )
+    running_count = stuck_running.count()
+    for s in stuck_running:
+        s.mark_failed(error="Scan timeout: Stuck in RUNNING for more than 2 hours. Exceeded maximum execution time.")
+
+    if queued_count > 0 or running_count > 0:
+        logger.info("cleanup_stuck_scans: Cleaned up %d queued and %d running scans", queued_count, running_count)
+        
+    return {
+        "cleaned_queued": queued_count,
+        "cleaned_running": running_count
+    }

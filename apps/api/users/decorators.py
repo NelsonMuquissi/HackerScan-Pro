@@ -67,3 +67,17 @@ def jwt_required(view_func):
         }, status=401)
 
     return _wrapped_view
+
+def superadmin_required(view_func):
+    """Requires the user to be a Platform SuperAdmin."""
+    @wraps(view_func)
+    @jwt_required
+    def _wrapped_view(request, *args, **kwargs):
+        if request.user.role != "superadmin":
+            return JsonResponse({
+                "error": True,
+                "code": "permission_denied",
+                "message": "Platform SuperAdmin role required."
+            }, status=403)
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
